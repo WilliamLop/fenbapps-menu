@@ -31,11 +31,11 @@ export interface OperationalInquiryItem {
   special_requests: string | null;
   status:
     | "received"
-    | "reviewing"
+    | "contacted"
     | "quoted"
-    | "confirmed_deposit"
-    | "declined"
-    | "completed";
+    | "confirmed"
+    | "rejected"
+    | "archived";
   internal_admin_notes: string | null;
   created_at: string;
   updated_at: string;
@@ -43,6 +43,38 @@ export interface OperationalInquiryItem {
   event_space_name: string | null;
   event_package_name: string | null;
   package_base_price: number | null;
+}
+
+export interface OperationalDirectOrderLineItem {
+  productId?: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  options?: string[];
+}
+
+export interface OperationalDirectOrderItem {
+  id: string;
+  reference_code: string;
+  fulfillment_type: "dine_in" | "delivery" | "pickup";
+  table_number: string | null;
+  pickup_slot: string | null;
+  customer_name: string;
+  customer_phone: string;
+  delivery_address: string | null;
+  delivery_neighborhood: string | null;
+  delivery_notes: string | null;
+  payment_method: "cash" | "card_dataphone" | "transfer";
+  payment_details: string | null;
+  items: OperationalDirectOrderLineItem[];
+  subtotal_amount: number;
+  delivery_fee: number;
+  total_amount: number;
+  status: "received" | "preparing" | "dispatched" | "completed" | "cancelled";
+  internal_admin_notes: string | null;
+  created_at: string;
+  updated_at: string;
+  location_name: string | null;
 }
 
 export interface OperationalAuditLogItem {
@@ -60,6 +92,7 @@ export interface OperationalConsoleSnapshot {
   restaurantSlug: string;
   products: OperationalProductItem[];
   inquiries: OperationalInquiryItem[];
+  directOrders: OperationalDirectOrderItem[];
   auditLogs: OperationalAuditLogItem[];
 }
 
@@ -93,6 +126,9 @@ export async function getOperationalConsoleSnapshot(
       : [],
     inquiries: Array.isArray(raw.inquiries)
       ? (raw.inquiries as OperationalInquiryItem[])
+      : [],
+    directOrders: Array.isArray(raw.direct_orders)
+      ? (raw.direct_orders as OperationalDirectOrderItem[])
       : [],
     auditLogs: Array.isArray(raw.audit_logs)
       ? (raw.audit_logs as OperationalAuditLogItem[])

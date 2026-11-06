@@ -383,6 +383,7 @@ async function runAudit() {
     }
 
     // Open the Table Shortlist ("Mi Selección en Mesa · Mostrar al Mesero") drawer
+    let deliveryOrderCode = null;
     const openShortlistBarBtn = page
       .locator("button", { hasText: "Mi Selección en Mesa" })
       .first();
@@ -393,7 +394,71 @@ async function runAudit() {
         path: path.join(SCREENSHOT_DIR, `06c-menu-${vp.name}-shortlist-drawer.png`),
         fullPage: false,
       });
-      // Close shortlist drawer
+
+      // Switch to "Domicilio" mode inside the drawer to verify Dual Experience
+      const deliveryTabBtn = page
+        .locator('[role="dialog"] [role="tab"]', { hasText: "Domicilio" })
+        .first();
+      if ((await deliveryTabBtn.count()) > 0) {
+        await deliveryTabBtn.click();
+        await page.waitForTimeout(300);
+
+        // Test Cash + Change calculator ("Necesito vueltas / cambio") with leading zero protection
+        const needChangeBtn = page
+          .locator('[role="dialog"] button', {
+            hasText: "Necesito vueltas / cambio",
+          })
+          .first();
+        if ((await needChangeBtn.count()) > 0) {
+          await needChangeBtn.click();
+          await page.fill("#cashBillAmountInput", "0200000");
+          const sanitizedBillVal = await page.inputValue("#cashBillAmountInput");
+          if (sanitizedBillVal !== "200000") {
+            throw new Error(
+              `Expected sanitized cash bill "200000", got "${sanitizedBillVal}"`
+            );
+          }
+        }
+
+        await page.screenshot({
+          path: path.join(
+            SCREENSHOT_DIR,
+            `06d-menu-${vp.name}-delivery-checkout.png`
+          ),
+          fullPage: false,
+        });
+
+        if (vp.name === "desktop") {
+          await page.fill("#orderCustomerName", "Santiago Vargas (QA E2E)");
+          await page.fill("#orderCustomerPhone", "3115558899");
+          await page.fill(
+            "#orderDeliveryAddress",
+            "Calle 93B # 13-45 · Oficina 402"
+          );
+          await page.fill("#orderDeliveryNeighborhood", "Parque de la 93");
+          await page.fill(
+            "#orderDeliveryNotes",
+            "Entregar en recepción piso 4."
+          );
+
+          await page.click('button[form="direct-order-checkout-form"]');
+          await page.waitForSelector("text=CÓDIGO CB-DOM-", { timeout: 10000 });
+          await page.waitForTimeout(350);
+          deliveryOrderCode = await page
+            .locator("text=CÓDIGO CB-DOM-")
+            .first()
+            .textContent();
+          await page.screenshot({
+            path: path.join(
+              SCREENSHOT_DIR,
+              `06e-menu-${vp.name}-delivery-confirmed.png`
+            ),
+            fullPage: false,
+          });
+        }
+      }
+
+      // Close shortlist/checkout drawer
       await page
         .locator('[role="dialog"] button[aria-label*="Cerrar"]')
         .first()
@@ -464,7 +529,16 @@ async function runAudit() {
       formText.toLowerCase().includes("estimado") &&
       formText.includes("$");
 
-    // Fill out and submit the inquiry form (only submit on mobile or both to verify E2E)
+    // Explicitly test leading-zero bug fix ("015" -> "15") on #guestCount
+    await page.fill("#guestCount", "015");
+    const sanitizedGuestVal = await page.inputValue("#guestCount");
+    if (sanitizedGuestVal !== "15") {
+      throw new Error(
+        `Leading-zero regression on #guestCount: expected "15", got "${sanitizedGuestVal}"`
+      );
+    }
+
+    // Fill out and submit the inquiry form
     await page.fill("#eventType", `Cena Ejecutiva QA (${vp.name})`);
     await page.fill("#guestCount", "28");
     await page.fill("#customerName", `Valeria Mendoza (${vp.name})`);
@@ -515,13 +589,53 @@ async function runAudit() {
       fullPage: true,
     });
 
-    // Click Tab 2: Mini-CRM de Solicitudes de Eventos
+    // Click Tab 2: Pedidos & Domicilios
+    const ordersTabBtn = page
+      .locator('[role="tab"]', { hasText: "Pedidos & Domicilios" })
+      .first();
+    if ((await ordersTabBtn.count()) > 0) {
+      await ordersTabBtn.click();
+      await page.waitForTimeout(350);
+      await page.screenshot({
+        path: path.join(
+          SCREENSHOT_DIR,
+          `11a-dashboard-${vp.name}-pedidos-domicilios.png`
+        ),
+        fullPage: false,
+      });
+    }
+
+    // Click Tab 3: Mini-CRM de Solicitudes de Eventos & verify status update works without constraint violation
+    let crmStatusUpdateVerified = false;
     const crmTabBtn = page
       .locator('[role="tab"]', { hasText: "Mini-CRM de Solicitudes" })
       .first();
     if ((await crmTabBtn.count()) > 0) {
       await crmTabBtn.click();
       await page.waitForTimeout(350);
+
+      if (vp.name === "desktop") {
+        const qaArticle = page
+          .locator("article", { hasText: "Valeria Mendoza" })
+          .first();
+        if ((await qaArticle.count()) > 0) {
+          const statusSelect = qaArticle.locator("select").first();
+          await statusSelect.selectOption("quoted");
+          await page.waitForTimeout(900);
+          const bannerText =
+            (await page.locator('[role="status"]').first().textContent()) || "";
+          if (
+            bannerText.includes("violates check constraint") ||
+            !bannerText.includes("actualizada correctamente")
+          ) {
+            throw new Error(
+              `CRM status update failed in E2E! Banner text: ${bannerText}`
+            );
+          }
+          crmStatusUpdateVerified = true;
+        }
+      }
+
       await page.screenshot({
         path: path.join(SCREENSHOT_DIR, `11b-dashboard-${vp.name}-crm-eventos.png`),
         fullPage: false,
@@ -578,6 +692,9 @@ async function runAudit() {
         hasLiveEstimateInForm,
         refBadgeText,
         waLinkHref,
+        sanitizedGuestVal,
+        deliveryOrderCode,
+        crmStatusUpdateVerified,
       },
     };
 

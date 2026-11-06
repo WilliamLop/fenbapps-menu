@@ -57,11 +57,23 @@ export interface EnabledModulesConfig {
   site: boolean;
 }
 
+export interface RestaurantDeliveryConfig {
+  enabled: boolean;
+  pickupEnabled: boolean;
+  deliveryFee: number;
+  freeDeliveryThreshold: number;
+  minOrderAmount: number;
+  estimatedDeliveryMinutes: string;
+  estimatedPickupMinutes: string;
+  transferInstructions: string;
+}
+
 export interface RestaurantAggregateData {
   restaurant: RestaurantRow;
   theme: RestaurantThemeConfig;
   contact: RestaurantContactConfig;
   enabledModules: EnabledModulesConfig;
+  delivery: RestaurantDeliveryConfig;
   locations: LocationRow[];
   menus: MenuRow[];
   categories: CategoryWithProducts[];
@@ -212,6 +224,13 @@ async function fetchRestaurantAggregateUncached(
       ? (restaurant.enabled_modules as Record<string, unknown>)
       : {};
 
+  const rawDelivery =
+    typeof restaurant.delivery_config === "object" &&
+    restaurant.delivery_config !== null &&
+    !Array.isArray(restaurant.delivery_config)
+      ? (restaurant.delivery_config as Record<string, unknown>)
+      : {};
+
   return {
     restaurant,
     theme: {
@@ -250,6 +269,34 @@ async function fetchRestaurantAggregateUncached(
       menu: rawModules.menu !== false,
       events: rawModules.events !== false,
       site: rawModules.site !== false,
+    },
+    delivery: {
+      enabled: rawDelivery.enabled !== false,
+      pickupEnabled: rawDelivery.pickupEnabled !== false,
+      deliveryFee:
+        typeof rawDelivery.deliveryFee === "number"
+          ? rawDelivery.deliveryFee
+          : 7000,
+      freeDeliveryThreshold:
+        typeof rawDelivery.freeDeliveryThreshold === "number"
+          ? rawDelivery.freeDeliveryThreshold
+          : 160000,
+      minOrderAmount:
+        typeof rawDelivery.minOrderAmount === "number"
+          ? rawDelivery.minOrderAmount
+          : 35000,
+      estimatedDeliveryMinutes:
+        typeof rawDelivery.estimatedDeliveryMinutes === "string"
+          ? rawDelivery.estimatedDeliveryMinutes
+          : "35 – 50 min",
+      estimatedPickupMinutes:
+        typeof rawDelivery.estimatedPickupMinutes === "string"
+          ? rawDelivery.estimatedPickupMinutes
+          : "20 – 25 min",
+      transferInstructions:
+        typeof rawDelivery.transferInstructions === "string"
+          ? rawDelivery.transferInstructions
+          : "Solicitar llave Bre-B / Nequi o QR bancario al confirmar por WhatsApp.",
     },
     locations,
     menus,

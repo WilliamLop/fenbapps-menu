@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getBogotaTodayIso } from "@/lib/utils";
 
 export const TIME_SLOT_VALUES = [
   "lunch",
@@ -31,7 +32,11 @@ export const publicEventInquirySchema = z.object({
     .max(80, "El tipo de evento no puede superar 80 caracteres."),
   tentativeDate: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Selecciona una fecha tentativa válida."),
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Selecciona una fecha tentativa válida.")
+    .refine(
+      (val) => val >= getBogotaTodayIso(),
+      "La fecha tentativa del evento no puede estar en el pasado."
+    ),
   preferredTimeSlot: z.enum(TIME_SLOT_VALUES, {
     errorMap: () => ({ message: "Selecciona una franja horaria." }),
   }),

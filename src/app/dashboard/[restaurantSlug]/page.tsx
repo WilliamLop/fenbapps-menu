@@ -202,6 +202,7 @@ export default async function RestaurantDashboardPage({
           currencyCode={data.restaurant.currency_code}
           initialProducts={snapshot?.products ?? fallbackProducts}
           initialInquiries={snapshot?.inquiries ?? []}
+          initialDirectOrders={snapshot?.directOrders ?? []}
           initialAuditLogs={snapshot?.auditLogs ?? []}
           locations={data.locations}
           eventSpaces={data.eventSpaces}

@@ -6,7 +6,11 @@ import { InteractiveMenuBrowser } from "@/components/public/interactive-menu-bro
 
 interface MenuPageProps {
   params: Promise<{ restaurantSlug: string }>;
-  searchParams: Promise<{ sede?: string }>;
+  searchParams: Promise<{
+    sede?: string;
+    modo?: string;
+    mesa?: string;
+  }>;
 }
 
 export async function generateMetadata({
@@ -18,10 +22,10 @@ export async function generateMetadata({
     return { title: "Carta Digital" };
   }
   return {
-    title: `Carta Digital · ${data.restaurant.name}`,
+    title: `Carta Digital & Pedidos · ${data.restaurant.name}`,
     description:
       data.menus[0]?.description ??
-      `Explora la carta actualizada de ${data.restaurant.name}.`,
+      `Explora la carta en mesa o pide a domicilio directo en ${data.restaurant.name}.`,
   };
 }
 
@@ -54,9 +58,14 @@ export default async function RestaurantMenuPage({
 
       <main className="flex-1">
         <InteractiveMenuBrowser
+          restaurantId={data.restaurant.id}
+          restaurantSlug={data.restaurant.slug}
           restaurantName={data.restaurant.name}
+          menuTitle={primaryMenu?.name ?? "Carta Principal"}
           currencyCode={data.restaurant.currency_code}
           whatsappPhone={data.contact.whatsappPrimary}
+          privacyPolicyText={data.contact.privacyPolicyText}
+          deliveryConfig={data.delivery}
           authenticityBadge={data.theme.authenticityBadge}
           serviceChargeNote={data.theme.serviceChargeNote}
           scheduleLabel={primaryMenu?.schedule_label}
@@ -64,6 +73,8 @@ export default async function RestaurantMenuPage({
           categories={data.categories}
           locations={data.locations}
           initialLocationSlug={resolvedSearch.sede}
+          initialMode={resolvedSearch.modo}
+          initialTableNumber={resolvedSearch.mesa}
         />
       </main>
     </div>

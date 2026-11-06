@@ -23,11 +23,21 @@ import {
   Pencil,
   Save,
   Sparkles,
+  Bike,
+  ShoppingBag,
+  Banknote,
+  CreditCard,
+  Smartphone,
 } from "lucide-react";
-import { formatCurrency, buildWhatsAppUrl } from "@/lib/utils";
+import {
+  formatCurrency,
+  buildWhatsAppUrl,
+  sanitizeNumericInput,
+} from "@/lib/utils";
 import type {
   OperationalProductItem,
   OperationalInquiryItem,
+  OperationalDirectOrderItem,
   OperationalAuditLogItem,
 } from "@/modules/admin/queries";
 import type {
@@ -38,6 +48,7 @@ import type {
 import {
   updateProductOperationalStateAction,
   updateEventInquiryOperationalStateAction,
+  updateDirectOrderStatusAction,
 } from "@/modules/admin/actions";
 
 interface InteractiveDashboardConsoleProps {
@@ -46,6 +57,7 @@ interface InteractiveDashboardConsoleProps {
   currencyCode: string;
   initialProducts: OperationalProductItem[];
   initialInquiries: OperationalInquiryItem[];
+  initialDirectOrders: OperationalDirectOrderItem[];
   initialAuditLogs: OperationalAuditLogItem[];
   locations: LocationRow[];
   eventSpaces: EventSpaceRow[];
@@ -63,8 +75,8 @@ const INQUIRY_STATUS_OPTIONS: Array<{
     badgeClass: "bg-amber-warn/15 text-amber-warn border-amber-warn/30",
   },
   {
-    value: "reviewing",
-    label: "En Revisión de Fecha",
+    value: "contacted",
+    label: "Contactado / En Revisión",
     badgeClass: "bg-gold/15 text-ink border-gold/40",
   },
   {
@@ -73,18 +85,50 @@ const INQUIRY_STATUS_OPTIONS: Array<{
     badgeClass: "bg-ember/15 text-ember border-ember/30",
   },
   {
-    value: "confirmed_deposit",
+    value: "confirmed",
     label: "Confirmada con Anticipo",
     badgeClass: "bg-sage/15 text-sage border-sage/30",
   },
   {
-    value: "completed",
-    label: "Evento Realizado",
+    value: "archived",
+    label: "Evento Realizado / Archivada",
     badgeClass: "bg-obsidian text-ivory border-obsidian",
   },
   {
-    value: "declined",
+    value: "rejected",
     label: "Declinada / Sin Cupo",
+    badgeClass: "bg-canvas-muted text-ink-muted border-hairline",
+  },
+];
+
+const DIRECT_ORDER_STATUS_OPTIONS: Array<{
+  value: OperationalDirectOrderItem["status"];
+  label: string;
+  badgeClass: string;
+}> = [
+  {
+    value: "received",
+    label: "Recibido (Nuevo)",
+    badgeClass: "bg-amber-warn/15 text-amber-warn border-amber-warn/30",
+  },
+  {
+    value: "preparing",
+    label: "En Cocina / Preparando",
+    badgeClass: "bg-ember/15 text-ember border-ember/30",
+  },
+  {
+    value: "dispatched",
+    label: "En Camino / Listo para Recoger",
+    badgeClass: "bg-gold/20 text-ink border-gold/40",
+  },
+  {
+    value: "completed",
+    label: "Entregado",
+    badgeClass: "bg-sage/15 text-sage border-sage/30",
+  },
+  {
+    value: "cancelled",
+    label: "Cancelado",
     badgeClass: "bg-canvas-muted text-ink-muted border-hairline",
   },
 ];
@@ -94,6 +138,7 @@ const TIME_SLOT_LABELS: Record<string, string> = {
   lunch: "Almuerzo (12:30 p. m. – 4:30 p. m.)",
   afternoon: "Tarde & Coctelería (4:30 p. m. – 7:30 p. m.)",
   dinner: "Cena Privada (7:30 p. m. – 11:30 p. m.)",
+  full_evening: "Velada Completa",
   full_day: "Jornada Completa",
 };
 
@@ -161,18 +206,21 @@ export function InteractiveDashboardConsole({
   currencyCode,
   initialProducts,
   initialInquiries,
+  initialDirectOrders,
   initialAuditLogs,
   locations,
   eventSpaces,
   eventPackages,
 }: InteractiveDashboardConsoleProps) {
-  const [activeTab, setActiveTab] = useState<"platos" | "eventos" | "qr">(
-    "platos"
-  );
+  const [activeTab, setActiveTab] = useState<
+    "platos" | "pedidos" | "eventos" | "qr"
+  >("platos");
   const [products, setProducts] =
     useState<OperationalProductItem[]>(initialProducts);
   const [inquiries, setInquiries] =
     useState<OperationalInquiryItem[]>(initialInquiries);
+  const [directOrders, setDirectOrders] =
+    useState<OperationalDirectOrderItem[]>(initialDirectOrders);
   const [auditLogs, setAuditLogs] =
     useState<OperationalAuditLogItem[]>(initialAuditLogs);
 
@@ -212,8 +260,21 @@ export function InteractiveDashboardConsole({
   ).length;
 
   const pendingInquiriesCount = inquiries.filter(
-    (i) => i.status === "received" || i.status === "reviewing"
+    (i) => i.status === "received" || i.status === "contacted"
   ).length;
+
+  const activeOrdersCount = directOrders.filter(
+    (o) =>
+      o.status === "received" ||
+      o.status === "preparing" ||
+      o.status === "dispatched"
+  ).length;
+
+  const totalDirectSalesAmount = directOrders
+    .filter((o) => o.status !== "cancelled")
+    .reduce((acc, o) => acc + Number(o.total_amount), 0);
+
+  const estimatedCommissionSavings = Math.round(totalDirectSalesAmount * 0.28);
 
   const filteredProducts = products.filter((prod) => {
     if (statusFilter !== "all" && prod.availability_status !== statusFilter) {
@@ -264,8 +325,8 @@ export function InteractiveDashboardConsole({
         newStatus === "available"
           ? "Disponible"
           : newStatus === "sold_out"
-          ? "Agotado por hoy"
-          : "Oculto en carta";
+            ? "Agotado por hoy"
+            : "Oculto en carta";
 
       setAuditLogs((curr) => [
         {
@@ -396,28 +457,82 @@ export function InteractiveDashboardConsole({
     });
   }
 
+  function handleUpdateDirectOrder(
+    order: OperationalDirectOrderItem,
+    newStatus: OperationalDirectOrderItem["status"]
+  ) {
+    const prevOrders = [...directOrders];
+    setDirectOrders((curr) =>
+      curr.map((item) =>
+        item.id === order.id ? { ...item, status: newStatus } : item
+      )
+    );
+
+    startTransition(async () => {
+      const res = await updateDirectOrderStatusAction({
+        restaurantSlug,
+        orderId: order.id,
+        status: newStatus,
+        internalNotes: order.internal_admin_notes ?? "",
+      });
+
+      if (!res.ok) {
+        setDirectOrders(prevOrders);
+        setFeedbackBanner({
+          type: "error",
+          text: res.error ?? "No fue posible actualizar el estado del pedido.",
+        });
+        return;
+      }
+
+      setAuditLogs((curr) => [
+        {
+          id: Date.now(),
+          action: "direct_order.status_update",
+          entity_type: "direct_order",
+          entity_id: order.id,
+          previous_state: {
+            reference_code: order.reference_code,
+            status: order.status,
+          },
+          new_state: {
+            reference_code: order.reference_code,
+            status: newStatus,
+          },
+          created_at: new Date().toISOString(),
+        },
+        ...curr.slice(0, 11),
+      ]);
+
+      setFeedbackBanner({
+        type: "success",
+        text: `Pedido ${order.reference_code} (${order.customer_name}) actualizado a estado "${
+          DIRECT_ORDER_STATUS_OPTIONS.find((s) => s.value === newStatus)?.label
+        }".`,
+      });
+    });
+  }
+
   const qrTargets = [
-    {
-      key: "brand-home",
-      badge: "QR Portada & Historia",
-      title: `${restaurantName} · Página Principal`,
-      subtitle:
-        "Ideal para bio de Instagram, tarjetas de presentación y recepción.",
-      relativeUrl: `/${restaurantSlug}`,
-    },
-    ...locations.map((loc) => ({
-      key: `menu-${loc.slug}`,
+    ...locations.map((loc, idx) => ({
+      key: `menu-table-${loc.slug}`,
       badge:
         locations.length > 1
-          ? `QR Inteligente de Mesa · ${loc.name}`
-          : "QR de Mesa · Carta Digital",
-      title: `Carta Digital (${loc.name})`,
+          ? `QR de Mesa · ${loc.name}`
+          : "QR de Mesa · Salón Principal",
+      title: `Carta en Mesa (${loc.name})`,
       subtitle:
-        locations.length > 1
-          ? `Al escanearlo en mesa, abre la carta pre-filtrada automáticamente en ${loc.name}.`
-          : `Abre directamente la Carta Digital de ${restaurantName} sin pantallas de carga.`,
-      relativeUrl: `/${restaurantSlug}/menu?sede=${loc.slug}`,
+        "Abre la carta limpia en Modo Mesa sin distractores de domicilio, pre-filtrada en esta sede.",
+      relativeUrl: `/${restaurantSlug}/menu?sede=${loc.slug}&mesa=${idx + 1}`,
     })),
+    {
+      key: "direct-delivery",
+      badge: "QR / Link Canal Propio 0% Comisión",
+      title: `${restaurantName} · Pedidos a Domicilio & Recoger`,
+      subtitle:
+        "Ideal para perfil de Instagram, WhatsApp Business e impresos de empaque (abre directo en modo Domicilio).",
+      relativeUrl: `/${restaurantSlug}/menu?modo=domicilio`,
+    },
     {
       key: "events-dossier",
       badge: "QR Comercial Corporativo",
@@ -425,6 +540,14 @@ export function InteractiveDashboardConsole({
       subtitle:
         "Para enviar a empresas, organizadores de eventos o ubicar cerca a los salones privados.",
       relativeUrl: `/${restaurantSlug}/eventos`,
+    },
+    {
+      key: "brand-home",
+      badge: "QR Portada & Historia",
+      title: `${restaurantName} · Página Principal`,
+      subtitle:
+        "Ideal para tarjetas de presentación, prensa gastronómica y recepción.",
+      relativeUrl: `/${restaurantSlug}`,
     },
   ];
 
@@ -463,7 +586,9 @@ export function InteractiveDashboardConsole({
       <text x="145" y="356" text-anchor="middle" font-family="monospace" font-size="9" fill="#6E655F">${target.relativeUrl}</text>
     </svg>`;
 
-    const blob = new Blob([svgContent], { type: "image/svg+xml;charset=utf-8" });
+    const blob = new Blob([svgContent], {
+      type: "image/svg+xml;charset=utf-8",
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -486,28 +611,29 @@ export function InteractiveDashboardConsole({
             <CheckCircle2 className="size-4 text-sage" />
           </div>
           <p className="tabular-price mt-2 font-display text-3xl font-semibold text-ink sm:text-4xl">
-            {availableCount}
+            {availableCount}{" "}
+            <span className="text-base font-normal text-ink-muted">
+              / {soldOutCount} agotados
+            </span>
           </p>
           <p className="mt-1 text-xs text-ink-muted">
-            Visibles y activos en carta hoy
+            {hiddenCount} ocultos · Control en 1 clic
           </p>
         </div>
 
         <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5">
           <div className="flex items-center justify-between text-ink-muted">
             <span className="text-xs font-semibold uppercase tracking-wider">
-              Agotados / Ocultos
+              Pedidos Directos (0% Comisión)
             </span>
-            <AlertCircle className="size-4 text-amber-warn" />
+            <Bike className="size-4 text-ember" />
           </div>
-          <p className="tabular-price mt-2 font-display text-3xl font-semibold text-amber-warn sm:text-4xl">
-            {soldOutCount}{" "}
-            <span className="text-lg font-normal text-ink-muted">
-              / {hiddenCount} ocultos
-            </span>
+          <p className="tabular-price mt-2 font-display text-3xl font-semibold text-ink sm:text-4xl">
+            {directOrders.length}
           </p>
-          <p className="mt-1 text-xs text-ink-muted">
-            Cambia en 1 clic abajo sin recargar
+          <p className="mt-1 text-xs font-medium text-sage">
+            {activeOrdersCount} activos ·{" "}
+            {formatCurrency(totalDirectSalesAmount, currencyCode)} vendidos
           </p>
         </div>
 
@@ -529,7 +655,7 @@ export function InteractiveDashboardConsole({
         <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5">
           <div className="flex items-center justify-between text-ink-muted">
             <span className="text-xs font-semibold uppercase tracking-wider">
-              Sedes & Salones QR
+              Sedes & Canales QR
             </span>
             <QrCode className="size-4 text-ember" />
           </div>
@@ -548,7 +674,7 @@ export function InteractiveDashboardConsole({
         </div>
       </div>
 
-      {/* Live Feedback Banner */}
+      {/* Live Feedback Banner (Never renders Carta link on error!) */}
       {feedbackBanner && (
         <div
           role="status"
@@ -559,17 +685,23 @@ export function InteractiveDashboardConsole({
           }`}
         >
           <div className="flex items-center gap-2.5">
-            <Sparkles className="size-4 shrink-0 text-ember" />
+            {feedbackBanner.type === "success" ? (
+              <Sparkles className="size-4 shrink-0 text-ember" />
+            ) : (
+              <AlertCircle className="size-4 shrink-0 text-crimson" />
+            )}
             <span className="font-medium">{feedbackBanner.text}</span>
           </div>
           <div className="flex items-center gap-3">
-            <Link
-              href={`/${restaurantSlug}/menu`}
-              className="inline-flex items-center gap-1 rounded-full bg-obsidian px-3.5 py-1.5 text-xs font-semibold text-ivory transition hover:bg-ember"
-            >
-              <span>Ver cambio en Carta Digital</span>
-              <ExternalLink className="size-3" />
-            </Link>
+            {feedbackBanner.type === "success" && activeTab === "platos" && (
+              <Link
+                href={`/${restaurantSlug}/menu`}
+                className="inline-flex items-center gap-1 rounded-full bg-obsidian px-3.5 py-1.5 text-xs font-semibold text-ivory transition hover:bg-ember"
+              >
+                <span>Ver cambio en Carta Digital</span>
+                <ExternalLink className="size-3" />
+              </Link>
+            )}
             <button
               type="button"
               onClick={() => setFeedbackBanner(null)}
@@ -599,7 +731,22 @@ export function InteractiveDashboardConsole({
           }`}
         >
           <UtensilsCrossed className="size-4 text-ember" />
-          <span>1. Disponibilidad & Precios en Vivo ({products.length})</span>
+          <span>1. Disponibilidad & Precios ({products.length})</span>
+        </button>
+
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "pedidos"}
+          onClick={() => setActiveTab("pedidos")}
+          className={`inline-flex min-h-11 items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition ${
+            activeTab === "pedidos"
+              ? "bg-obsidian text-ivory shadow-sm"
+              : "border border-hairline bg-canvas-elevated text-ink-muted hover:text-ink"
+          }`}
+        >
+          <Bike className="size-4 text-ember" />
+          <span>2. Pedidos & Domicilios ({directOrders.length})</span>
         </button>
 
         <button
@@ -614,7 +761,7 @@ export function InteractiveDashboardConsole({
           }`}
         >
           <CalendarCheck className="size-4 text-ember" />
-          <span>2. Mini-CRM de Solicitudes de Eventos ({inquiries.length})</span>
+          <span>3. Mini-CRM de Solicitudes de Eventos ({inquiries.length})</span>
         </button>
 
         <button
@@ -629,7 +776,7 @@ export function InteractiveDashboardConsole({
           }`}
         >
           <QrCode className="size-4 text-ember" />
-          <span>3. Códigos QR Inteligentes por Sede ({qrTargets.length})</span>
+          <span>4. Códigos QR Inteligentes ({qrTargets.length})</span>
         </button>
       </div>
 
@@ -686,7 +833,7 @@ export function InteractiveDashboardConsole({
             </div>
           </div>
 
-          {/* Mobile Responsive Cards (< md) — Zero Horizontal Overflow */}
+          {/* Mobile Responsive Cards (< md) */}
           <div className="divide-y divide-hairline md:hidden">
             {filteredProducts.map((product) => (
               <div key={product.id} className="p-4 space-y-3">
@@ -708,9 +855,15 @@ export function InteractiveDashboardConsole({
                     {editingPriceId === product.id ? (
                       <div className="flex items-center gap-1">
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
                           value={priceDraft}
-                          onChange={(e) => setPriceDraft(e.target.value)}
+                          onChange={(e) =>
+                            setPriceDraft(
+                              sanitizeNumericInput(e.target.value, 8)
+                            )
+                          }
                           className="w-24 rounded-lg border border-ember bg-canvas px-2 py-1 font-mono text-xs text-ink"
                         />
                         <button
@@ -880,9 +1033,15 @@ export function InteractiveDashboardConsole({
                       {editingPriceId === product.id ? (
                         <div className="inline-flex items-center justify-end gap-1.5">
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             value={priceDraft}
-                            onChange={(e) => setPriceDraft(e.target.value)}
+                            onChange={(e) =>
+                              setPriceDraft(
+                                sanitizeNumericInput(e.target.value, 8)
+                              )
+                            }
                             className="w-28 rounded-xl border border-ember bg-canvas px-2.5 py-1 text-right font-mono text-xs text-ink focus:outline-none"
                           />
                           <button
@@ -929,7 +1088,276 @@ export function InteractiveDashboardConsole({
         </div>
       )}
 
-      {/* TAB 2: MINI-CRM DE SOLICITUDES DE EVENTOS */}
+      {/* TAB 2: LIVE DIRECT ORDERS & COMMISSION-FREE DELIVERY CONSOLE */}
+      {activeTab === "pedidos" && (
+        <div className="space-y-6">
+          {/* Commercial ROI Banner */}
+          <div className="grid grid-cols-1 gap-4 rounded-3xl border border-obsidian-border bg-obsidian p-5 text-ivory sm:grid-cols-3 sm:p-6">
+            <div className="sm:col-span-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-gold">
+                Canal Propio 0% Comisión · Impacto Directo en Margen
+              </span>
+              <h2 className="mt-1 font-display text-2xl font-semibold text-ivory sm:text-3xl">
+                Bandeja de Domicilios & Pedidos Para Recoger
+              </h2>
+              <p className="mt-1 text-xs leading-relaxed text-ivory-muted">
+                Cada pedido recibido aquí se registra en{" "}
+                <code className="text-gold">public.direct_orders</code> con
+                medio de pago (Efectivo y vueltas exactas, Datáfono o
+                Transferencia) sin pagar el ~28% de comisión de plataformas
+                externas.
+              </p>
+            </div>
+            <div className="flex flex-col justify-center rounded-2xl border border-obsidian-border bg-obsidian-card px-4 py-3 text-right">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-ivory-muted">
+                Ahorro estimado en comisiones
+              </span>
+              <span className="tabular-price mt-0.5 font-mono text-2xl font-bold text-sage">
+                + {formatCurrency(estimatedCommissionSavings, currencyCode)}
+              </span>
+              <span className="text-[11px] text-ivory-muted">
+                sobre {formatCurrency(totalDirectSalesAmount, currencyCode)} en
+                ventas directas
+              </span>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5 sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline pb-4">
+              <h3 className="font-display text-2xl font-semibold text-ink">
+                Órdenes Registradas ({directOrders.length})
+              </h3>
+              <Link
+                href={`/${restaurantSlug}/menu?modo=domicilio`}
+                className="inline-flex items-center gap-2 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
+              >
+                <Bike className="size-3.5" />
+                <span>Simular nuevo domicilio en la Carta →</span>
+              </Link>
+            </div>
+
+            {directOrders.length === 0 ? (
+              <p className="mt-5 rounded-2xl border border-dashed border-hairline bg-canvas p-6 text-center text-sm text-ink-muted">
+                Aún no hay pedidos directos registrados. Haz clic arriba en
+                &ldquo;Simular nuevo domicilio en la Carta&rdquo; para probar el
+                flujo completo.
+              </p>
+            ) : (
+              <div className="mt-5 grid grid-cols-1 gap-5">
+                {directOrders.map((order) => {
+                  const statusMeta =
+                    DIRECT_ORDER_STATUS_OPTIONS.find(
+                      (s) => s.value === order.status
+                    ) ?? DIRECT_ORDER_STATUS_OPTIONS[0]!;
+
+                  const paymentIcon =
+                    order.payment_method === "cash" ? (
+                      <Banknote className="size-3.5 text-sage" />
+                    ) : order.payment_method === "card_dataphone" ? (
+                      <CreditCard className="size-3.5 text-ember" />
+                    ) : (
+                      <Smartphone className="size-3.5 text-gold" />
+                    );
+
+                  const paymentLabel =
+                    order.payment_method === "cash"
+                      ? "Efectivo"
+                      : order.payment_method === "card_dataphone"
+                        ? "Tarjeta / Datáfono"
+                        : "Transferencia";
+
+                  const statusUpdateWaMsg = [
+                    `Hola ${order.customer_name}, te escribimos de *${restaurantName}*.`,
+                    `Tu pedido *${order.reference_code}* por *${formatCurrency(
+                      Number(order.total_amount),
+                      currencyCode
+                    )}* se encuentra en estado: *${statusMeta.label}*.`,
+                    order.fulfillment_type === "delivery" &&
+                    order.delivery_address
+                      ? `Dirección registrada: ${order.delivery_address}${
+                          order.delivery_neighborhood
+                            ? ` (${order.delivery_neighborhood})`
+                            : ""
+                        }.`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join("\n");
+
+                  const customerWaHref = buildWhatsAppUrl(
+                    order.customer_phone,
+                    statusUpdateWaMsg
+                  );
+
+                  return (
+                    <article
+                      key={order.id}
+                      className="rounded-3xl border border-hairline bg-canvas p-5 sm:p-6 transition hover:border-ember/40"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-hairline pb-4">
+                        <div className="space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-lg bg-obsidian px-2.5 py-1 font-mono text-xs font-bold text-gold">
+                              {order.reference_code}
+                            </span>
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-xs font-semibold ${
+                                order.fulfillment_type === "delivery"
+                                  ? "bg-ember/15 text-ember"
+                                  : "bg-obsidian/10 text-ink"
+                              }`}
+                            >
+                              {order.fulfillment_type === "delivery" ? (
+                                <>
+                                  <Bike className="size-3" />
+                                  <span>A Domicilio</span>
+                                </>
+                              ) : (
+                                <>
+                                  <ShoppingBag className="size-3" />
+                                  <span>Para Recoger</span>
+                                </>
+                              )}
+                            </span>
+                            <span
+                              className={`rounded-full border px-3 py-0.5 text-xs font-semibold ${statusMeta.badgeClass}`}
+                            >
+                              {statusMeta.label}
+                            </span>
+                          </div>
+
+                          <h4 className="font-display text-2xl font-semibold text-ink">
+                            {order.customer_name} ·{" "}
+                            <span className="font-mono text-sm font-normal text-ink-muted">
+                              {order.customer_phone}
+                            </span>
+                          </h4>
+                        </div>
+
+                        <div className="rounded-2xl border border-hairline bg-canvas-elevated px-4 py-2 text-right">
+                          <span className="block text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
+                            Total Orden
+                          </span>
+                          <span className="tabular-price font-mono text-lg font-bold text-ink">
+                            {formatCurrency(
+                              Number(order.total_amount),
+                              currencyCode
+                            )}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                        {/* Column 1: Items */}
+                        <div className="space-y-1.5 text-xs">
+                          <p className="font-semibold uppercase tracking-wider text-ink-muted">
+                            Platos Solicitados
+                          </p>
+                          <ul className="space-y-1">
+                            {(Array.isArray(order.items) ? order.items : []).map(
+                              (item, idx) => (
+                                <li
+                                  key={`${order.id}-item-${idx}`}
+                                  className="text-ink"
+                                >
+                                  <strong>{item.quantity}x</strong> {item.name}
+                                  {item.options && item.options.length > 0 && (
+                                    <span className="block text-[11px] text-ink-muted">
+                                      ({item.options.join(", ")})
+                                    </span>
+                                  )}
+                                </li>
+                              )
+                            )}
+                          </ul>
+                        </div>
+
+                        {/* Column 2: Delivery / Pickup & Payment Details */}
+                        <div className="space-y-1.5 text-xs">
+                          <p className="font-semibold uppercase tracking-wider text-ink-muted">
+                            Entrega & Medio de Pago
+                          </p>
+                          {order.location_name && (
+                            <p className="font-medium text-ink">
+                              📍 Sede: {order.location_name}
+                            </p>
+                          )}
+                          {order.fulfillment_type === "delivery" ? (
+                            <p className="text-ink">
+                              🏠 <strong>{order.delivery_address}</strong>
+                              {order.delivery_neighborhood
+                                ? ` · ${order.delivery_neighborhood}`
+                                : ""}
+                            </p>
+                          ) : (
+                            <p className="text-ink">
+                              🕒 Paso estimado:{" "}
+                              <strong>
+                                {order.pickup_slot ?? "Lo antes posible"}
+                              </strong>
+                            </p>
+                          )}
+
+                          <div className="mt-1 inline-flex items-center gap-1.5 rounded-xl border border-hairline bg-canvas-elevated px-2.5 py-1.5 font-medium text-ink">
+                            {paymentIcon}
+                            <span>
+                              {order.payment_details ?? paymentLabel}
+                            </span>
+                          </div>
+
+                          {order.delivery_notes && (
+                            <p className="rounded-xl bg-canvas-elevated p-2 text-ink-muted italic">
+                              &ldquo;{order.delivery_notes}&rdquo;
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Column 3: Operational Status Control + WhatsApp */}
+                        <div className="space-y-2.5">
+                          <label className="block text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                            Estado en Cocina / Despacho
+                          </label>
+                          <select
+                            value={order.status}
+                            disabled={isPending}
+                            onChange={(e) =>
+                              handleUpdateDirectOrder(
+                                order,
+                                e.target
+                                  .value as OperationalDirectOrderItem["status"]
+                              )
+                            }
+                            aria-label={`Estado del pedido ${order.reference_code}`}
+                            className="h-10 w-full rounded-xl border border-hairline bg-canvas-elevated px-3 text-xs font-semibold text-ink focus:border-ember focus:outline-none"
+                          >
+                            {DIRECT_ORDER_STATUS_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+
+                          <a
+                            href={customerWaHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-full bg-ember px-3.5 py-2 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
+                          >
+                            <MessageCircle className="size-3.5" />
+                            <span>Avisar estado por WhatsApp</span>
+                          </a>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: MINI-CRM DE SOLICITUDES DE EVENTOS */}
       {activeTab === "eventos" && (
         <div className="space-y-6">
           <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5 sm:p-6">
@@ -1084,6 +1512,7 @@ export function InteractiveDashboardConsole({
                         <select
                           value={inq.status}
                           disabled={isPending}
+                          aria-label={`Estado comercial de ${inq.reference_code}`}
                           onChange={(e) =>
                             handleUpdateInquiry(
                               inq,
@@ -1198,24 +1627,27 @@ export function InteractiveDashboardConsole({
         </div>
       )}
 
-      {/* TAB 3: SMART QR GENERATOR PER LOCATION & CHANNEL */}
+      {/* TAB 4: SMART QR GENERATOR PER LOCATION & CHANNEL */}
       {activeTab === "qr" && (
         <div className="rounded-3xl border border-hairline bg-canvas-elevated p-6">
           <div className="max-w-3xl">
             <span className="text-xs font-semibold uppercase tracking-[0.14em] text-ember">
-              Kit de Mesa & Acceso Instantáneo Zero-Splash
+              Kit de Mesa, Redes Sociales & Empaques
             </span>
             <h2 className="mt-1 font-display text-3xl font-semibold text-ink">
-              Generador de Códigos QR Inteligentes por Sede
+              Generador de Códigos QR Contextuales por Canal
             </h2>
             <p className="mt-1 text-sm text-ink-muted">
-              Cuando un restaurante tiene múltiples sedes, cada sede tiene su
-              propio QR con el parámetro inteligente{" "}
+              Los QRs de mesa usan{" "}
               <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs text-ember">
-                ?sede=...
+                ?sede=...&amp;mesa=...
               </code>{" "}
-              para que el comensal entre directamente a la carta y especialidades
-              de esa ubicación sin pasos adicionales.
+              para abrir la carta limpia en Modo Mesa, mientras el QR de
+              domicilios usa{" "}
+              <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs text-ember">
+                ?modo=domicilio
+              </code>{" "}
+              para activar el checkout directo de inmediato.
             </p>
           </div>
 
@@ -1227,7 +1659,6 @@ export function InteractiveDashboardConsole({
                   key={target.key}
                   className="flex flex-col justify-between rounded-3xl border border-hairline bg-canvas p-5 sm:flex-row sm:items-center gap-5"
                 >
-                  {/* Visual SVG QR Matrix Preview */}
                   <div className="mx-auto flex flex-col items-center rounded-2xl border border-hairline bg-white p-3.5 shadow-xs sm:mx-0 shrink-0">
                     <svg
                       viewBox="0 0 21 21"
@@ -1251,7 +1682,7 @@ export function InteractiveDashboardConsole({
                       )}
                     </svg>
                     <span className="mt-1.5 font-mono text-[9px] font-semibold uppercase tracking-widest text-ink-muted">
-                      ESCÁNER MESA
+                      QR INTELIGENTE
                     </span>
                   </div>
 
@@ -1280,7 +1711,9 @@ export function InteractiveDashboardConsole({
 
                       <button
                         type="button"
-                        onClick={() => copyQrLink(target.key, target.relativeUrl)}
+                        onClick={() =>
+                          copyQrLink(target.key, target.relativeUrl)
+                        }
                         className="inline-flex items-center gap-1 rounded-full border border-hairline bg-canvas-elevated px-3 py-1.5 text-xs font-medium text-ink transition hover:border-ember"
                       >
                         {copiedQrKey === target.key ? (
@@ -1323,15 +1756,14 @@ export function InteractiveDashboardConsole({
             </h3>
           </div>
           <p className="mt-1 text-xs text-ink-muted">
-            Cada cambio de disponibilidad, precio o estado de cotización queda
-            registrado con el estado anterior y nuevo del registro.
+            Cada cambio de disponibilidad, precio, pedido directo o cotización
+            queda registrado con su estado anterior y nuevo.
           </p>
 
           {auditLogs.length === 0 ? (
             <p className="mt-4 rounded-2xl border border-dashed border-hairline bg-canvas p-4 text-xs text-ink-muted">
               Aún no hay cambios registrados en esta sesión. Prueba cambiando un
-              plato a &ldquo;Agotado hoy&rdquo; o actualizando una solicitud de
-              evento arriba para ver cómo se registra en vivo.
+              plato, el estado de un domicilio o una solicitud de evento arriba.
             </p>
           ) : (
             <div className="mt-4 space-y-2.5 max-h-60 overflow-y-auto pr-1">
@@ -1378,9 +1810,11 @@ export function InteractiveDashboardConsole({
             <p className="mt-2 text-xs leading-relaxed text-ivory-muted">
               Las tablas públicas mantienen{" "}
               <code className="text-gold">FORCE ROW LEVEL SECURITY</code> contra
-              accesos anónimos directos, mientras las acciones operativas pasan
-              por funciones validadas con trazabilidad en{" "}
-              <code className="text-gold">public.audit_logs</code>.
+              accesos anónimos directos (cero exposición de PII en{" "}
+              <code className="text-gold">event_inquiries</code> y{" "}
+              <code className="text-gold">direct_orders</code>), mientras las
+              acciones operativas pasan por funciones validadas con trazabilidad
+              en <code className="text-gold">public.audit_logs</code>.
             </p>
           </div>
 

@@ -118,6 +118,102 @@ export type Database = {
           },
         ]
       }
+      direct_orders: {
+        Row: {
+          created_at: string
+          customer_name: string
+          customer_phone: string
+          delivery_address: string | null
+          delivery_fee: number
+          delivery_neighborhood: string | null
+          delivery_notes: string | null
+          fulfillment_type: string
+          id: string
+          internal_admin_notes: string | null
+          items: Json
+          location_id: string | null
+          payment_details: string | null
+          payment_method: string
+          pickup_slot: string | null
+          privacy_accepted: boolean
+          reference_code: string
+          restaurant_id: string
+          source_ip_hash: string | null
+          status: string
+          subtotal_amount: number
+          table_number: string | null
+          total_amount: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          customer_name: string
+          customer_phone: string
+          delivery_address?: string | null
+          delivery_fee?: number
+          delivery_neighborhood?: string | null
+          delivery_notes?: string | null
+          fulfillment_type: string
+          id?: string
+          internal_admin_notes?: string | null
+          items?: Json
+          location_id?: string | null
+          payment_details?: string | null
+          payment_method: string
+          pickup_slot?: string | null
+          privacy_accepted?: boolean
+          reference_code: string
+          restaurant_id: string
+          source_ip_hash?: string | null
+          status?: string
+          subtotal_amount: number
+          table_number?: string | null
+          total_amount: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          customer_name?: string
+          customer_phone?: string
+          delivery_address?: string | null
+          delivery_fee?: number
+          delivery_neighborhood?: string | null
+          delivery_notes?: string | null
+          fulfillment_type?: string
+          id?: string
+          internal_admin_notes?: string | null
+          items?: Json
+          location_id?: string | null
+          payment_details?: string | null
+          payment_method?: string
+          pickup_slot?: string | null
+          privacy_accepted?: boolean
+          reference_code?: string
+          restaurant_id?: string
+          source_ip_hash?: string | null
+          status?: string
+          subtotal_amount?: number
+          table_number?: string | null
+          total_amount?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "direct_orders_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_orders_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       event_inquiries: {
         Row: {
           company_name: string | null
@@ -775,6 +871,7 @@ export type Database = {
           created_at: string
           cuisine_type: string | null
           currency_code: string
+          delivery_config: Json
           enabled_modules: Json
           id: string
           is_demo: boolean
@@ -791,6 +888,7 @@ export type Database = {
           created_at?: string
           cuisine_type?: string | null
           currency_code?: string
+          delivery_config?: Json
           enabled_modules?: Json
           id?: string
           is_demo?: boolean
@@ -807,6 +905,7 @@ export type Database = {
           created_at?: string
           cuisine_type?: string | null
           currency_code?: string
+          delivery_config?: Json
           enabled_modules?: Json
           id?: string
           is_demo?: boolean
@@ -829,6 +928,29 @@ export type Database = {
         Args: { p_restaurant_slug: string }
         Returns: Json
       }
+      submit_public_direct_order: {
+        Args: {
+          p_customer_name: string
+          p_customer_phone: string
+          p_delivery_address?: string
+          p_delivery_fee: number
+          p_delivery_neighborhood?: string
+          p_delivery_notes?: string
+          p_fulfillment_type: string
+          p_items: Json
+          p_location_id?: string
+          p_payment_details?: string
+          p_payment_method: string
+          p_pickup_slot?: string
+          p_privacy_accepted: boolean
+          p_restaurant_id: string
+          p_source_ip_hash?: string
+          p_subtotal_amount: number
+          p_table_number?: string
+          p_total_amount: number
+        }
+        Returns: Json
+      }
       submit_public_event_inquiry: {
         Args: {
           p_company_name?: string
@@ -846,6 +968,15 @@ export type Database = {
           p_source_ip_hash?: string
           p_special_requests?: string
           p_tentative_date: string
+        }
+        Returns: Json
+      }
+      update_direct_order_status: {
+        Args: {
+          p_internal_notes: string
+          p_order_id: string
+          p_restaurant_slug: string
+          p_status: string
         }
         Returns: Json
       }
@@ -999,3 +1130,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

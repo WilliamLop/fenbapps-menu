@@ -20,7 +20,12 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { formatCurrency, buildWhatsAppUrl } from "@/lib/utils";
+import {
+  formatCurrency,
+  buildWhatsAppUrl,
+  sanitizeNumericInput,
+  getBogotaTodayIso,
+} from "@/lib/utils";
 import {
   TIME_SLOT_VALUES,
   TIME_SLOT_LABELS,
@@ -137,12 +142,14 @@ export function EventInquiryComposer({
   const [customCelebrationText, setCustomCelebrationText] =
     useState<string>("");
 
+  const minTentativeDate = useMemo(() => getBogotaTodayIso(), []);
   const [tentativeDate, setTentativeDate] = useState<string>(
     getDefaultFutureDateString()
   );
   const [preferredTimeSlot, setPreferredTimeSlot] =
     useState<(typeof TIME_SLOT_VALUES)[number]>("dinner");
-  const [guestCount, setGuestCount] = useState<number>(20);
+  const [guestCountInput, setGuestCountInput] = useState<string>("20");
+  const guestCount = guestCountInput === "" ? 0 : Number(guestCountInput);
   const [selectedExtras, setSelectedExtras] = useState<string[]>([]);
 
   const [customerName, setCustomerName] = useState<string>("");
@@ -229,7 +236,7 @@ export function EventInquiryComposer({
       setSelectedLocationId(space.location_id);
     }
     if (guestCount < space.min_guests) {
-      setGuestCount(space.min_guests);
+      setGuestCountInput(String(space.min_guests));
     }
     const formEl = document.getElementById("solicitud-cotizacion-eventos");
     formEl?.scrollIntoView({ behavior: "smooth" });
@@ -239,7 +246,7 @@ export function EventInquiryComposer({
     setSelectedPackageId(pkg.id);
     setSelectedExtras([]);
     if (guestCount < pkg.min_guests) {
-      setGuestCount(pkg.min_guests);
+      setGuestCountInput(String(pkg.min_guests));
     }
     // Pillar 1: Auto-sync celebration type preset with chosen package!
     if (pkg.event_category === "birthday") {
@@ -264,6 +271,18 @@ export function EventInquiryComposer({
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFormError(null);
+
+    if (guestCount < 6 || guestCount > 500) {
+      setFormError(
+        "El número de invitados para eventos privados debe estar entre 6 y 500 personas."
+      );
+      return;
+    }
+
+    if (tentativeDate < minTentativeDate) {
+      setFormError("La fecha tentativa del evento no puede estar en el pasado.");
+      return;
+    }
 
     if (!privacyAccepted) {
       setFormError(
@@ -1003,16 +1022,54 @@ export function EventInquiryComposer({
                   >
                     Invitados estimados *
                   </label>
-                  <input
-                    id="guestCount"
-                    type="number"
-                    min={6}
-                    max={500}
-                    required
-                    value={guestCount}
-                    onChange={(e) => setGuestCount(Number(e.target.value))}
-                    className="tabular-price h-11 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3.5 font-mono text-sm text-ivory focus:border-ember focus:outline-none"
-                  />
+                  <div className="flex h-11 items-center rounded-xl border border-obsidian-border bg-obsidian-card px-2 focus-within:border-ember">
+                    <button
+                      type="button"
+                      aria-label="Disminuir invitados"
+                      onClick={() =>
+                        setGuestCountInput(
+                          String(Math.max(6, (guestCount || 6) - 1))
+                        )
+                      }
+                      className="flex size-7 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-ivory-muted transition hover:bg-obsidian hover:text-ivory"
+                    >
+                      −
+                    </button>
+                    <input
+                      id="guestCount"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      required
+                      placeholder="20"
+                      value={guestCountInput}
+                      onChange={(e) =>
+                        setGuestCountInput(
+                          sanitizeNumericInput(e.target.value, 3)
+                        )
+                      }
+                      onBlur={() => {
+                        if (!guestCountInput || Number(guestCountInput) < 6) {
+                          setGuestCountInput("6");
+                        } else if (Number(guestCountInput) > 500) {
+                          setGuestCountInput("500");
+                        }
+                      }}
+                      className="tabular-price h-full w-full bg-transparent px-2 text-center font-mono text-sm text-ivory placeholder:text-ivory-muted/40 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Aumentar invitados"
+                      onClick={() =>
+                        setGuestCountInput(
+                          String(Math.min(500, (guestCount || 6) + 1))
+                        )
+                      }
+                      className="flex size-7 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-ivory-muted transition hover:bg-obsidian hover:text-ivory"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
 
                 <div>
@@ -1026,6 +1083,7 @@ export function EventInquiryComposer({
                   <input
                     id="tentativeDate"
                     type="date"
+                    min={minTentativeDate}
                     required
                     value={tentativeDate}
                     onChange={(e) => setTentativeDate(e.target.value)}
