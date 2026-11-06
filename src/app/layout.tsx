@@ -1,14 +1,41 @@
 import type { Metadata } from "next";
+import {
+  Cormorant_Garamond,
+  Plus_Jakarta_Sans,
+  JetBrains_Mono,
+} from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 
+const cormorant = Cormorant_Garamond({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  style: ["normal", "italic"],
+  display: "swap",
+  variable: "--font-cormorant",
+});
+
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+  variable: "--font-jakarta",
+});
+
+const jetbrains = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  display: "swap",
+  variable: "--font-jetbrains",
+});
+
 export const metadata: Metadata = {
   title: {
-    default: "Casa Brasa · Cocina de Leña, Menú Digital & Eventos Privados",
-    template: "%s | Casa Brasa · Plataforma Gastronómica",
+    default: "Fenbapps Hospitality · Carta Digital, Pedidos Directos & Eventos",
+    template: "%s · Hospitalidad Directa",
   },
   description:
-    "Demostración comercial interactiva: Menú digital inteligente con fotografía real de alta fidelidad, sistema de cotización de eventos privados y gestión multi-sede.",
+    "Plataforma comercial para restaurantes: carta digital interactiva, pedidos directos 0% comisión, dossier de salones para eventos y consola operativa en tiempo real.",
 };
 
 export default function RootLayout({
@@ -17,22 +44,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html
+      lang="es"
+      className={`${cormorant.variable} ${jakarta.variable} ${jetbrains.variable}`}
+    >
       <body className="min-h-screen bg-canvas text-ink selection:bg-ember selection:text-ivory">
         {children}
-        <Toaster position="bottom-center" richColors closeButton />
+        <Toaster position="top-center" offset={76} richColors closeButton />
       </body>
     </html>
   );

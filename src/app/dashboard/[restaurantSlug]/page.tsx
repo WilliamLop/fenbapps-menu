@@ -7,11 +7,11 @@ import {
   ExternalLink,
   QrCode,
   Lock,
-  Flame,
 } from "lucide-react";
 import { getRestaurantBySlug } from "@/modules/tenant/queries";
 import { getOperationalConsoleSnapshot } from "@/modules/admin/queries";
 import { createSupabaseAuthenticatedServerClient } from "@/lib/supabase/server";
+import { BrandIcon } from "@/components/public/brand-icon";
 import { InteractiveDashboardConsole } from "@/components/admin/interactive-dashboard-console";
 
 interface DashboardPageProps {
@@ -73,15 +73,18 @@ export default async function RestaurantDashboardPage({
   );
 
   return (
-    <div className="min-h-screen bg-canvas text-ink">
+    <div
+      data-theme={data.theme.palette}
+      className="min-h-screen bg-canvas text-ink"
+    >
       {/* Top Scenario & Demo Bar */}
-      <div className="border-b border-obsidian-border bg-obsidian px-4 py-2 text-xs text-ivory-muted">
+      <div className="border-b border-obsidian-border bg-obsidian px-4 py-2 text-xs text-ivory">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-ember/25 px-2.5 py-0.5 font-medium text-ember-glow">
+            <span className="rounded-full border border-obsidian-border bg-obsidian-card px-2.5 py-0.5 font-semibold text-gold">
               Centro de Mando &quot;Mise en Place&quot;
             </span>
-            <span className="hidden sm:inline">
+            <span className="hidden text-ivory-muted sm:inline">
               Alterna entre el escenario Multi-Sede (2 sedes) y Sede Única (1
               establecimiento):
             </span>
@@ -90,23 +93,23 @@ export default async function RestaurantDashboardPage({
           <div className="flex items-center gap-2">
             <Link
               href="/dashboard/casa-brasa"
-              className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
                 data.restaurant.slug === "casa-brasa"
-                  ? "bg-ember text-ivory"
+                  ? "bg-ivory text-obsidian shadow-2xs"
                   : "border border-obsidian-border bg-obsidian-card text-ivory-muted hover:text-ivory"
               }`}
             >
-              🔥 Casa Brasa (2 Sedes)
+              Casa Brasa (2 Sedes)
             </Link>
             <Link
               href="/dashboard/botanica-brunch"
-              className={`rounded-full px-3 py-1 text-[11px] font-semibold transition ${
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
                 data.restaurant.slug === "botanica-brunch"
-                  ? "bg-ember text-ivory"
+                  ? "bg-ivory text-obsidian shadow-2xs"
                   : "border border-obsidian-border bg-obsidian-card text-ivory-muted hover:text-ivory"
               }`}
             >
-              🌿 Botánica (1 Sede)
+              Botánica (1 Sede)
             </Link>
           </div>
         </div>
@@ -116,17 +119,17 @@ export default async function RestaurantDashboardPage({
       <header className="sticky top-0 z-30 border-b border-hairline bg-canvas/95 px-4 py-3.5 backdrop-blur-md sm:px-6">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-obsidian text-gold shadow-xs">
-              <Flame className="size-5 text-ember-glow" />
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-ember text-ivory shadow-xs">
+              <BrandIcon icon={data.theme.brandIcon} className="size-5" />
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="font-display text-xl font-semibold text-ink sm:text-2xl">
                   {data.restaurant.name} · Consola Operativa
                 </h1>
-                <span className="rounded-full bg-sage/15 px-2.5 py-0.5 text-[11px] font-semibold text-sage">
+                <span className="rounded-full border border-sage/30 bg-sage/12 px-2.5 py-0.5 text-xs font-semibold text-sage">
                   {data.locations.length === 1
-                    ? "1 Sola Sede"
+                    ? "Casa Única"
                     : `${data.locations.length} Sedes Activas`}
                 </span>
               </div>
@@ -140,57 +143,68 @@ export default async function RestaurantDashboardPage({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={`/${data.restaurant.slug}`}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-hairline bg-canvas-elevated px-3.5 py-2 text-xs font-semibold text-ink transition hover:border-ember"
-            >
-              <span>Sitio Web</span>
-              <ExternalLink className="size-3" />
-            </Link>
-            <Link
-              href={`/${data.restaurant.slug}/menu`}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-hairline bg-canvas-elevated px-3.5 py-2 text-xs font-semibold text-ink transition hover:border-ember"
-            >
-              <QrCode className="size-3.5 text-ember" />
-              <span>Carta Digital</span>
-              <ExternalLink className="size-3" />
-            </Link>
-            <Link
-              href={`/${data.restaurant.slug}/eventos`}
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-obsidian px-4 py-2 text-xs font-semibold text-ivory transition hover:bg-ember"
-            >
-              <CalendarCheck className="size-3.5 text-gold" />
-              <span>Eventos & Salones</span>
-              <ExternalLink className="size-3" />
-            </Link>
+            {data.enabledModules.site && (
+              <Link
+                href={`/${data.restaurant.slug}`}
+                className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-border-strong bg-canvas-elevated px-3.5 py-2 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
+              >
+                <span>Sitio Web</span>
+                <ExternalLink className="size-3.5" />
+              </Link>
+            )}
+            {data.enabledModules.menu && (
+              <Link
+                href={`/${data.restaurant.slug}/menu`}
+                className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-border-strong bg-canvas-elevated px-3.5 py-2 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
+              >
+                <QrCode className="size-3.5 text-ember" />
+                <span>Carta Digital</span>
+                <ExternalLink className="size-3.5" />
+              </Link>
+            )}
+            {data.enabledModules.events && (
+              <Link
+                href={`/${data.restaurant.slug}/eventos`}
+                className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory shadow-2xs transition hover:bg-ember-hover"
+              >
+                <CalendarCheck className="size-3.5" />
+                <span>Eventos & Salones</span>
+                <ExternalLink className="size-3.5" />
+              </Link>
+            )}
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
         {/* Security & Interactive Mode Banner */}
-        <div className="mb-8 rounded-3xl border border-obsidian-border bg-obsidian p-5 text-ivory shadow-sm">
+        <div className="mb-8 rounded-3xl border border-hairline bg-surface-accent/65 p-5 text-ink shadow-2xs">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
             <div className="flex items-start gap-3.5">
               <ShieldCheck className="mt-0.5 size-6 shrink-0 text-sage" />
               <div>
-                <h2 className="text-sm font-semibold text-ivory">
+                <h2 className="text-sm font-semibold text-ink">
                   Consola Operativa en Tiempo Real · Seguridad Multi-Tenant RLS
                 </h2>
-                <p className="mt-1 text-xs leading-relaxed text-ivory-muted">
+                <p className="mt-1 text-xs leading-relaxed text-ink-muted">
                   Prueba agotando cualquier plato en 1 clic, cambiando su precio,
                   actualizando el estado de una solicitud de evento o
-                  descargando los códigos QR por sede. Todos los cambios se
-                  persisten en PostgreSQL con auditoría en{" "}
-                  <code className="text-gold">public.audit_logs</code> mientras
-                  las tablas mantienen{" "}
-                  <code className="text-gold">FORCE ROW LEVEL SECURITY</code>.
+                  descargando los códigos QR ISO/IEC 18004 escaneables. Todos los
+                  cambios se persisten en PostgreSQL con auditoría en{" "}
+                  <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs font-semibold text-ember">
+                    public.audit_logs
+                  </code>{" "}
+                  mientras las tablas mantienen{" "}
+                  <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs font-semibold text-ember">
+                    FORCE ROW LEVEL SECURITY
+                  </code>
+                  .
                 </p>
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-2 rounded-2xl border border-obsidian-border bg-obsidian-card px-3.5 py-2 text-xs">
-              <Lock className="size-4 text-gold" />
+            <div className="flex shrink-0 items-center gap-2 rounded-2xl border border-hairline bg-canvas px-3.5 py-2 text-xs font-semibold text-ink">
+              <Lock className="size-4 text-sage" />
               <span>Advisors Security Lints: 0</span>
             </div>
           </div>
@@ -200,6 +214,10 @@ export default async function RestaurantDashboardPage({
           restaurantSlug={data.restaurant.slug}
           restaurantName={data.restaurant.name}
           currencyCode={data.restaurant.currency_code}
+          enabledModules={data.enabledModules}
+          deliveryEnabled={
+            data.delivery.enabled || data.delivery.pickupEnabled
+          }
           initialProducts={snapshot?.products ?? fallbackProducts}
           initialInquiries={snapshot?.inquiries ?? []}
           initialDirectOrders={snapshot?.directOrders ?? []}

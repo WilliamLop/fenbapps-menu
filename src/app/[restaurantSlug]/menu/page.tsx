@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getRestaurantBySlug } from "@/modules/tenant/queries";
 import { RestaurantNavbar } from "@/components/public/restaurant-navbar";
+import { RestaurantFooter } from "@/components/public/restaurant-footer";
 import { InteractiveMenuBrowser } from "@/components/public/interactive-menu-browser";
 
 interface MenuPageProps {
@@ -46,11 +47,15 @@ export default async function RestaurantMenuPage({
   const primaryMenu = data.menus[0];
 
   return (
-    <div className="min-h-screen flex flex-col bg-canvas">
+    <div
+      data-theme={data.theme.palette}
+      className="min-h-screen flex flex-col bg-canvas text-ink"
+    >
       <RestaurantNavbar
         slug={data.restaurant.slug}
         name={data.restaurant.name}
         cuisineType={data.restaurant.cuisine_type}
+        brandIcon={data.theme.brandIcon}
         isDemo={data.restaurant.is_demo}
         enabledModules={data.enabledModules}
         activeTab="menu"
@@ -61,6 +66,9 @@ export default async function RestaurantMenuPage({
           restaurantId={data.restaurant.id}
           restaurantSlug={data.restaurant.slug}
           restaurantName={data.restaurant.name}
+          brandIcon={data.theme.brandIcon}
+          searchPlaceholder={data.theme.searchPlaceholder}
+          signatureBadgeLabel={data.theme.signatureBadgeLabel}
           menuTitle={primaryMenu?.name ?? "Carta Principal"}
           currencyCode={data.restaurant.currency_code}
           whatsappPhone={data.contact.whatsappPrimary}
@@ -77,6 +85,15 @@ export default async function RestaurantMenuPage({
           initialTableNumber={resolvedSearch.mesa}
         />
       </main>
+
+      <RestaurantFooter
+        slug={data.restaurant.slug}
+        name={data.restaurant.name}
+        tagline={data.restaurant.tagline}
+        contact={data.contact}
+        locations={data.locations}
+        enabledModules={data.enabledModules}
+      />
     </div>
   );
 }

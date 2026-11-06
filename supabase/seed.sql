@@ -515,3 +515,40 @@ BEGIN
   ON CONFLICT (reference_code) DO NOTHING;
 END;
 $$;
+
+
+-- ============================================================================
+-- Iteration 6 Seed Sync: Multi-Tenant Themes, Bespoke Brunch Assets & Hierarchy
+-- ============================================================================
+UPDATE public.restaurants
+SET theme_config = COALESCE(theme_config, '{}'::jsonb) || jsonb_build_object(
+  'palette', 'brasa-roble',
+  'brandIcon', 'flame',
+  'heroStyle', 'immersive-dark',
+  'heroImage', '/demo/casa-brasa/hero-steak.jpg',
+  'signatureBadgeLabel', 'Corte Insignia',
+  'searchPlaceholder', 'Buscar corte, entrada, cóctel o ingrediente...'
+)
+WHERE slug = 'casa-brasa';
+
+UPDATE public.locations l
+SET
+  cover_image_url = '/demo/casa-brasa/salon-gallery-3.jpg',
+  gallery_urls = '["/demo/casa-brasa/salon-gallery-3.jpg", "/demo/casa-brasa/salon-cava-cristal.jpg", "/demo/casa-brasa/salon-terraza-fuego.jpg", "/demo/casa-brasa/salon-gallery-2.jpg"]'::jsonb
+FROM public.restaurants r
+WHERE l.restaurant_id = r.id
+  AND r.slug = 'casa-brasa'
+  AND l.slug = 'parque-93';
+
+UPDATE public.event_packages ep
+SET is_featured = (ep.slug = 'experiencia-corporativa-mesa-de-fuego')
+FROM public.restaurants r
+WHERE ep.restaurant_id = r.id
+  AND r.slug = 'casa-brasa';
+
+UPDATE public.products p
+SET image_url = '/demo/botanica-brunch/dish-rigatoni-truffle.jpg'
+FROM public.restaurants r
+WHERE p.restaurant_id = r.id
+  AND r.slug = 'casa-brasa'
+  AND p.slug = 'mac-and-cheese-trufado-al-horno-de-lena';

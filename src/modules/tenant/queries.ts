@@ -37,7 +37,22 @@ export interface PackageExtraItem {
   price: string;
 }
 
+export type TenantPalettePreset =
+  | "brasa-roble"
+  | "botanica-huerta"
+  | "mar-pacifico"
+  | "cava-borgona";
+
+export type TenantBrandIcon = "flame" | "leaf" | "waves" | "wine" | "utensils";
+
+export type TenantHeroStyle = "immersive-dark" | "sunlit-editorial";
+
 export interface RestaurantThemeConfig {
+  palette: TenantPalettePreset;
+  brandIcon: TenantBrandIcon;
+  heroStyle: TenantHeroStyle;
+  searchPlaceholder: string;
+  signatureBadgeLabel: string;
   archetype?: string;
   heroImage?: string;
   authenticityBadge?: string;
@@ -80,6 +95,126 @@ export interface RestaurantAggregateData {
   featuredProducts: ProductWithDetails[];
   eventSpaces: EventSpaceRow[];
   eventPackages: EventPackageRow[];
+}
+
+const VALID_PALETTES = new Set<TenantPalettePreset>([
+  "brasa-roble",
+  "botanica-huerta",
+  "mar-pacifico",
+  "cava-borgona",
+]);
+
+const VALID_ICONS = new Set<TenantBrandIcon>([
+  "flame",
+  "leaf",
+  "waves",
+  "wine",
+  "utensils",
+]);
+
+export function resolveTenantTheme(
+  slug: string,
+  cuisineType: string | null,
+  rawTheme: Record<string, unknown>
+): RestaurantThemeConfig {
+  const archetype =
+    typeof rawTheme.archetype === "string" ? rawTheme.archetype : undefined;
+  const combinedHint = `${slug} ${cuisineType ?? ""} ${archetype ?? ""}`.toLowerCase();
+
+  const isBotanical =
+    combinedHint.includes("botanica") ||
+    combinedHint.includes("huerta") ||
+    combinedHint.includes("brunch") ||
+    combinedHint.includes("invernadero");
+
+  const isCoastal =
+    combinedHint.includes("mar") ||
+    combinedHint.includes("pacifico") ||
+    combinedHint.includes("ceviche") ||
+    combinedHint.includes("nikkei");
+
+  const isWineBistro =
+    combinedHint.includes("bistro") ||
+    combinedHint.includes("cava") ||
+    combinedHint.includes("trattoria");
+
+  const defaultPalette: TenantPalettePreset = isBotanical
+    ? "botanica-huerta"
+    : isCoastal
+      ? "mar-pacifico"
+      : isWineBistro
+        ? "cava-borgona"
+        : "brasa-roble";
+
+  const palette =
+    typeof rawTheme.palette === "string" &&
+    VALID_PALETTES.has(rawTheme.palette as TenantPalettePreset)
+      ? (rawTheme.palette as TenantPalettePreset)
+      : defaultPalette;
+
+  const defaultIcon: TenantBrandIcon =
+    palette === "botanica-huerta"
+      ? "leaf"
+      : palette === "mar-pacifico"
+        ? "waves"
+        : palette === "cava-borgona"
+          ? "wine"
+          : slug === "casa-brasa"
+            ? "flame"
+            : "utensils";
+
+  const brandIcon =
+    typeof rawTheme.brandIcon === "string" &&
+    VALID_ICONS.has(rawTheme.brandIcon as TenantBrandIcon)
+      ? (rawTheme.brandIcon as TenantBrandIcon)
+      : defaultIcon;
+
+  const heroStyle: TenantHeroStyle =
+    rawTheme.heroStyle === "sunlit-editorial" ||
+    rawTheme.heroStyle === "immersive-dark"
+      ? rawTheme.heroStyle
+      : palette === "botanica-huerta"
+        ? "sunlit-editorial"
+        : "immersive-dark";
+
+  const searchPlaceholder =
+    typeof rawTheme.searchPlaceholder === "string" &&
+    rawTheme.searchPlaceholder.trim().length > 0
+      ? rawTheme.searchPlaceholder
+      : palette === "botanica-huerta"
+        ? "Buscar plato de la huerta, brunch o vino natural..."
+        : slug === "casa-brasa"
+          ? "Buscar corte madurado, entrada o vino..."
+          : "Buscar plato, ingrediente o bebida...";
+
+  const signatureBadgeLabel =
+    typeof rawTheme.signatureBadgeLabel === "string" &&
+    rawTheme.signatureBadgeLabel.trim().length > 0
+      ? rawTheme.signatureBadgeLabel
+      : palette === "botanica-huerta"
+        ? "Insignia de la Huerta"
+        : slug === "casa-brasa"
+          ? "Corte Insignia"
+          : "Especialidad de la Casa";
+
+  return {
+    palette,
+    brandIcon,
+    heroStyle,
+    searchPlaceholder,
+    signatureBadgeLabel,
+    archetype,
+    heroImage:
+      typeof rawTheme.heroImage === "string" ? rawTheme.heroImage : undefined,
+    authenticityBadge:
+      typeof rawTheme.authenticityBadge === "string"
+        ? rawTheme.authenticityBadge
+        : undefined,
+    serviceChargeNote:
+      typeof rawTheme.serviceChargeNote === "string"
+        ? rawTheme.serviceChargeNote
+        : undefined,
+  };
 }
 
 async function fetchRestaurantAggregateUncached(
@@ -231,27 +366,20 @@ async function fetchRestaurantAggregateUncached(
       ? (restaurant.delivery_config as Record<string, unknown>)
       : {};
 
+  const fallbackWhatsapp =
+    locations[0]?.whatsapp_phone ??
+    (typeof rawContact.whatsappPrimary === "string"
+      ? rawContact.whatsappPrimary
+      : "");
+
   return {
     restaurant,
-    theme: {
-      archetype:
-        typeof rawTheme.archetype === "string" ? rawTheme.archetype : undefined,
-      heroImage:
-        typeof rawTheme.heroImage === "string" ? rawTheme.heroImage : undefined,
-      authenticityBadge:
-        typeof rawTheme.authenticityBadge === "string"
-          ? rawTheme.authenticityBadge
-          : undefined,
-      serviceChargeNote:
-        typeof rawTheme.serviceChargeNote === "string"
-          ? rawTheme.serviceChargeNote
-          : undefined,
-    },
+    theme: resolveTenantTheme(restaurant.slug, restaurant.cuisine_type, rawTheme),
     contact: {
       whatsappPrimary:
         typeof rawContact.whatsappPrimary === "string"
           ? rawContact.whatsappPrimary
-          : "+573105550193",
+          : fallbackWhatsapp,
       instagramHandle:
         typeof rawContact.instagramHandle === "string"
           ? rawContact.instagramHandle
@@ -263,7 +391,7 @@ async function fetchRestaurantAggregateUncached(
       privacyPolicyText:
         typeof rawContact.privacyPolicyText === "string"
           ? rawContact.privacyPolicyText
-          : "Autorizo el tratamiento de mis datos personales para gestionar esta solicitud conforme a la Ley 1581 de 2012.",
+          : `Autorizo a ${restaurant.name} el tratamiento de mis datos personales para gestionar esta solicitud conforme a la Ley 1581 de 2012.`,
     },
     enabledModules: {
       menu: rawModules.menu !== false,

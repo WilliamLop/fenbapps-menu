@@ -6,7 +6,10 @@ import {
   formatCurrency,
   buildWhatsAppUrl,
   sanitizeNumericInput,
+  getAdaptiveThreeColumnGrid,
+  getRestaurantRefPrefix,
 } from "@/lib/utils";
+import { resolveTenantTheme } from "@/modules/tenant/queries";
 import type { Database } from "@/types/database.types";
 
 const SUPABASE_URL = "https://gssikxqasqjbyvcdccgl.supabase.co";
@@ -38,9 +41,38 @@ describe("1. Validadores de Dominio, Sanitización Numérica & Blindaje Anti-Abu
     expect(sanitizeNumericInput("abc028xyz")).toBe("28");
   });
 
-  it("acepta una solicitud de evento comercial válida con Habeas Data aceptado", () => {
+  it("acepta una solicitud de evento comercial válida con Habeas Data aceptado (incluyendo franja 'breakfast' / Brunch)", () => {
     const parsed = publicEventInquirySchema.safeParse(validPayload);
     expect(parsed.success).toBe(true);
+
+    const parsedBrunch = publicEventInquirySchema.safeParse({
+      ...validPayload,
+      preferredTimeSlot: "breakfast" as const,
+    });
+    expect(parsedBrunch.success).toBe(true);
+  });
+
+  it("resuelve grillas adaptativas (1/2/3+ elementos), prefijos dinámicos de tenant y temas editoriales", () => {
+    expect(getAdaptiveThreeColumnGrid(1)).toBe("grid-cols-1");
+    expect(getAdaptiveThreeColumnGrid(2)).toBe("grid-cols-1 md:grid-cols-2");
+    expect(getAdaptiveThreeColumnGrid(3)).toBe(
+      "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+    );
+    expect(getRestaurantRefPrefix("casa-brasa")).toBe("CB");
+    expect(getRestaurantRefPrefix("botanica-brunch")).toBe("BB");
+
+    const botanicaTheme = resolveTenantTheme(
+      "botanica-brunch",
+      "Cocina de Huerta, Brunch & Vino Natural",
+      {
+        theme_palette: "botanica-huerta",
+        brand_icon: "leaf",
+        hero_style: "sunlit-editorial",
+      }
+    );
+    expect(botanicaTheme.palette).toBe("botanica-huerta");
+    expect(botanicaTheme.brandIcon).toBe("leaf");
+    expect(botanicaTheme.heroStyle).toBe("sunlit-editorial");
   });
 
   it("rechaza fechas pasadas como 2019-01-09 en el cotizador de eventos", () => {

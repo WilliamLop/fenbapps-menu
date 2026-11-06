@@ -2,6 +2,7 @@ import { z } from "zod";
 import { getBogotaTodayIso } from "@/lib/utils";
 
 export const TIME_SLOT_VALUES = [
+  "breakfast",
   "lunch",
   "afternoon",
   "dinner",
@@ -9,6 +10,7 @@ export const TIME_SLOT_VALUES = [
 ] as const;
 
 export const TIME_SLOT_LABELS: Record<(typeof TIME_SLOT_VALUES)[number], string> = {
+  breakfast: "Mañana / Brunch (8:30 a. m. – 12:30 p. m.)",
   lunch: "Almuerzo (12:30 p. m. – 4:00 p. m.)",
   afternoon: "Tarde & Atardecer (4:00 p. m. – 7:30 p. m.)",
   dinner: "Cena Privada (7:30 p. m. – 11:30 p. m.)",

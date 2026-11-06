@@ -1,42 +1,150 @@
 @import "tailwindcss";
 
-:root {
-  --font-cormorant: "Cormorant Garamond", Georgia, Cambria, serif;
-  --font-jakarta: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-jetbrains: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+:root,
+[data-theme="brasa-roble"] {
+  /* Editorial Light Surfaces — Warm Parchment & Oak */
+  --theme-canvas: oklch(97.5% 0.008 75);
+  --theme-canvas-elevated: oklch(99.3% 0.004 75);
+  --theme-canvas-muted: oklch(94.4% 0.012 72);
+  --theme-surface-accent: oklch(95.4% 0.022 55);
+
+  /* Editorial Ink Hierarchy (AAA / AA+ Verified) */
+  --theme-ink: oklch(19.5% 0.016 45);
+  --theme-ink-muted: oklch(41.5% 0.016 48);
+  --theme-ink-subtle: oklch(49.5% 0.014 50);
+
+  /* Dividers & Accessible Form Borders (WCAG 1.4.11 >= 3.4:1) */
+  --theme-hairline: oklch(87% 0.014 68);
+  --theme-border-strong: oklch(61.5% 0.016 60);
+
+  /* Brand & Culinary Accents */
+  --theme-brand: oklch(49.5% 0.16 38);
+  --theme-brand-hover: oklch(44% 0.155 38);
+  --theme-brand-glow: oklch(72.5% 0.145 45);
+  --theme-accent-ink: oklch(46% 0.095 68);
+  --theme-gold: oklch(78.5% 0.105 78);
+
+  /* Atmospheric Evening Surfaces (Warm Roasted Espresso — Zero Pure-Black Halation) */
+  --theme-night: oklch(18.5% 0.016 45);
+  --theme-night-card: oklch(24% 0.018 45);
+  --theme-night-border: oklch(50% 0.018 48);
+  --theme-ivory: oklch(97% 0.007 75);
+  --theme-ivory-muted: oklch(79.5% 0.012 65);
 }
 
-@theme {
-  --font-display: var(--font-cormorant);
-  --font-sans: var(--font-jakarta);
-  --font-mono: var(--font-jetbrains);
+[data-theme="botanica-huerta"] {
+  /* Sunlit Botanical Linen & Conservatory Sage */
+  --theme-canvas: oklch(97.8% 0.008 110);
+  --theme-canvas-elevated: oklch(99.4% 0.004 110);
+  --theme-canvas-muted: oklch(94.6% 0.014 130);
+  --theme-surface-accent: oklch(95.2% 0.024 142);
 
-  /* Editorial Public Surface Tokens (OKLCH) */
-  --color-canvas: oklch(97.5% 0.008 75);
-  --color-canvas-elevated: oklch(99.2% 0.004 75);
-  --color-canvas-muted: oklch(94.2% 0.012 72);
+  /* Forest Botanical Ink Hierarchy (AAA / AA+ Verified) */
+  --theme-ink: oklch(20.5% 0.022 155);
+  --theme-ink-muted: oklch(41.5% 0.022 152);
+  --theme-ink-subtle: oklch(49.5% 0.018 150);
 
-  /* Obsidian Night Surface Tokens (Hero & Event Salons) */
-  --color-obsidian: oklch(15.5% 0.012 45);
-  --color-obsidian-card: oklch(20.5% 0.014 45);
-  --color-obsidian-border: oklch(28.5% 0.016 45);
+  /* Dividers & Accessible Form Borders */
+  --theme-hairline: oklch(87% 0.016 135);
+  --theme-border-strong: oklch(61.5% 0.02 142);
 
-  /* Editorial Ink & Ember Accents */
-  --color-ink: oklch(18% 0.015 45);
-  --color-ink-muted: oklch(43% 0.015 50);
-  --color-ivory: oklch(96.5% 0.008 75);
-  --color-ivory-muted: oklch(76% 0.012 65);
+  /* Cypress Sage Primary + Clay Oven Secondary Accent */
+  --theme-brand: oklch(46.5% 0.105 152);
+  --theme-brand-hover: oklch(41% 0.1 152);
+  --theme-brand-glow: oklch(76.5% 0.11 148);
+  --theme-accent-ink: oklch(46.5% 0.12 42);
+  --theme-gold: oklch(79.5% 0.095 82);
 
-  --color-ember: oklch(53% 0.165 38);
-  --color-ember-hover: oklch(47% 0.165 38);
-  --color-ember-glow: oklch(65% 0.175 42);
-  --color-gold: oklch(72% 0.11 78);
-  --color-hairline: oklch(88.5% 0.012 70);
+  /* Deep Conservatory Pine for Atmospheric Accents */
+  --theme-night: oklch(21% 0.03 155);
+  --theme-night-card: oklch(26.5% 0.034 155);
+  --theme-night-border: oklch(52% 0.03 152);
+  --theme-ivory: oklch(97.2% 0.008 110);
+  --theme-ivory-muted: oklch(81% 0.016 140);
+}
 
-  /* Semantic Status Colors */
-  --color-sage: oklch(50% 0.13 155);
-  --color-amber-warn: oklch(60% 0.15 65);
-  --color-crimson: oklch(52% 0.19 28);
+[data-theme="mar-pacifico"] {
+  --theme-canvas: oklch(97.8% 0.006 85);
+  --theme-canvas-elevated: oklch(99.4% 0.003 85);
+  --theme-canvas-muted: oklch(94.6% 0.012 225);
+  --theme-surface-accent: oklch(95% 0.02 225);
+  --theme-ink: oklch(20.5% 0.025 240);
+  --theme-ink-muted: oklch(42% 0.022 238);
+  --theme-ink-subtle: oklch(50% 0.018 235);
+  --theme-hairline: oklch(87% 0.014 225);
+  --theme-border-strong: oklch(61.5% 0.018 235);
+  --theme-brand: oklch(47% 0.11 232);
+  --theme-brand-hover: oklch(41.5% 0.105 232);
+  --theme-brand-glow: oklch(75% 0.105 220);
+  --theme-accent-ink: oklch(46.5% 0.105 55);
+  --theme-gold: oklch(79% 0.1 75);
+  --theme-night: oklch(19.5% 0.028 240);
+  --theme-night-card: oklch(25% 0.032 240);
+  --theme-night-border: oklch(51.5% 0.028 235);
+  --theme-ivory: oklch(97.2% 0.006 85);
+  --theme-ivory-muted: oklch(80.5% 0.014 225);
+}
+
+[data-theme="cava-borgona"] {
+  --theme-canvas: oklch(97.6% 0.008 65);
+  --theme-canvas-elevated: oklch(99.3% 0.004 65);
+  --theme-canvas-muted: oklch(94.5% 0.012 35);
+  --theme-surface-accent: oklch(95% 0.02 18);
+  --theme-ink: oklch(20% 0.018 20);
+  --theme-ink-muted: oklch(42% 0.018 22);
+  --theme-ink-subtle: oklch(50% 0.015 25);
+  --theme-hairline: oklch(87% 0.014 35);
+  --theme-border-strong: oklch(61.5% 0.016 35);
+  --theme-brand: oklch(45.5% 0.145 18);
+  --theme-brand-hover: oklch(40% 0.14 18);
+  --theme-brand-glow: oklch(74% 0.125 20);
+  --theme-accent-ink: oklch(46% 0.095 72);
+  --theme-gold: oklch(78.5% 0.1 80);
+  --theme-night: oklch(19% 0.022 18);
+  --theme-night-card: oklch(24.5% 0.026 18);
+  --theme-night-border: oklch(51% 0.024 20);
+  --theme-ivory: oklch(97% 0.007 65);
+  --theme-ivory-muted: oklch(80% 0.012 35);
+}
+
+@theme inline {
+  --font-display: var(--font-cormorant), Georgia, Cambria, serif;
+  --font-sans: var(--font-jakarta), -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
+
+  /* Editorial Public Surface Tokens */
+  --color-canvas: var(--theme-canvas);
+  --color-canvas-elevated: var(--theme-canvas-elevated);
+  --color-canvas-muted: var(--theme-canvas-muted);
+  --color-surface-accent: var(--theme-surface-accent);
+
+  /* Atmospheric Evening Surface Tokens */
+  --color-obsidian: var(--theme-night);
+  --color-obsidian-card: var(--theme-night-card);
+  --color-obsidian-border: var(--theme-night-border);
+
+  /* Editorial Ink & Brand Accents */
+  --color-ink: var(--theme-ink);
+  --color-ink-muted: var(--theme-ink-muted);
+  --color-ink-subtle: var(--theme-ink-subtle);
+  --color-ink-faint: var(--theme-ink-subtle);
+  --color-ivory: var(--theme-ivory);
+  --color-ivory-muted: var(--theme-ivory-muted);
+
+  --color-ember: var(--theme-brand);
+  --color-ember-hover: var(--theme-brand-hover);
+  --color-ember-glow: var(--theme-brand-glow);
+  --color-accent-ink: var(--theme-accent-ink);
+  --color-gold: var(--theme-gold);
+  --color-hairline: var(--theme-hairline);
+  --color-border-strong: var(--theme-border-strong);
+
+  /* Semantic Status Colors (WCAG AA >= 6.3:1 Verified) */
+  --color-sage: oklch(45% 0.115 155);
+  --color-sage-on-dark: oklch(75% 0.125 152);
+  --color-amber-warn: oklch(46.5% 0.12 62);
+  --color-amber-on-dark: oklch(76% 0.135 70);
+  --color-crimson: oklch(48% 0.175 28);
 }
 
 @layer base {
@@ -63,9 +171,17 @@
     background-color: var(--color-canvas);
     color: var(--color-ink);
     font-family: var(--font-sans);
+    font-variant-numeric: lining-nums;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-variant-numeric: lining-nums;
   }
 }
 
 .tabular-price {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: lining-nums tabular-nums;
 }

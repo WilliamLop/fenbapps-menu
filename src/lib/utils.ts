@@ -27,11 +27,6 @@ export function formatCurrency(amount: number, currencyCode = "COP"): string {
 /**
  * Sanitizes user-typed numeric strings so clearing a field or typing after zero
  * never produces "015" or "04".
- * Examples:
- *   "015" -> "15"
- *   "04"  -> "4"
- *   "0"   -> ""
- *   "abc25" -> "25"
  */
 export function sanitizeNumericInput(raw: string, maxDigits = 9): string {
   if (!raw) return "";
@@ -49,6 +44,33 @@ export function getBogotaTodayIso(): string {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date());
+}
+
+/**
+ * Derives a clean 2-letter tenant prefix from a restaurant slug (matching SQL RPC logic).
+ * Examples:
+ *   "casa-brasa" -> "CB"
+ *   "botanica-brunch" -> "BB"
+ */
+export function getRestaurantRefPrefix(slug: string): string {
+  const clean = slug.trim().toLowerCase();
+  if (!clean) return "RS";
+  const parts = clean.split("-").filter(Boolean);
+  if (parts.length >= 2 && parts[0]?.[0] && parts[1]?.[0]) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return clean.slice(0, 2).toUpperCase();
+}
+
+/**
+ * Computes responsive grid column classes based on actual item cardinality
+ * so 1, 2, 3, or 4 items never leave awkward orphan columns or dead whitespace.
+ */
+export function getAdaptiveThreeColumnGrid(count: number): string {
+  if (count <= 1) return "grid-cols-1";
+  if (count === 2) return "grid-cols-1 md:grid-cols-2";
+  if (count === 4) return "grid-cols-1 md:grid-cols-2";
+  return "grid-cols-1 md:grid-cols-2 lg:grid-cols-3";
 }
 
 /**

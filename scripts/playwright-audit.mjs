@@ -142,9 +142,23 @@ async function runAudit() {
       }
     });
 
-    // 1. Audit "/" -> "/casa-brasa"
-    console.log(`[${vp.name}] Auditing / -> /casa-brasa...`);
-    await page.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });
+    // 0. Audit "/" (SaaS Showcase & Demo Switcher)
+    console.log(`[${vp.name}] Auditing / (SaaS Showcase)...`);
+    await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(450);
+    if (vp.name === "desktop") {
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter6-after-saas-home.png`),
+        fullPage: false,
+      });
+    }
+    report.routeAudits.push(
+      await collectPageMetrics(page, "/", vp.name)
+    );
+
+    // 1. Audit "/casa-brasa"
+    console.log(`[${vp.name}] Auditing /casa-brasa...`);
+    await page.goto(`${BASE_URL}/casa-brasa`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(500);
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, `01-home-${vp.name}-top.png`),
@@ -191,7 +205,7 @@ async function runAudit() {
     // 2. Audit "/casa-brasa/menu"
     console.log(`[${vp.name}] Auditing /casa-brasa/menu...`);
     await page.goto(`${BASE_URL}/casa-brasa/menu`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
     });
     await page.waitForTimeout(500);
     await page.screenshot({
@@ -278,8 +292,8 @@ async function runAudit() {
     await searchInput.fill("");
     await page.waitForTimeout(200);
 
-    // Click "Insignias del Chef" filter
-    const highlightsBtn = page.locator("button", { hasText: "Insignias del Chef" });
+    // Click "Recomendados" filter
+    const highlightsBtn = page.locator("button", { hasText: "Recomendados" });
     await highlightsBtn.click();
     await page.waitForTimeout(200);
     const highlightsCount = await page.locator("article").count();
@@ -469,7 +483,7 @@ async function runAudit() {
     // 3. Audit "/casa-brasa/eventos"
     console.log(`[${vp.name}] Auditing /casa-brasa/eventos...`);
     await page.goto(`${BASE_URL}/casa-brasa/eventos`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
     });
     await page.waitForTimeout(500);
     await page.screenshot({
@@ -538,46 +552,50 @@ async function runAudit() {
       );
     }
 
-    // Fill out and submit the inquiry form
-    await page.fill("#eventType", `Cena Ejecutiva QA (${vp.name})`);
-    await page.fill("#guestCount", "28");
-    await page.fill("#customerName", `Valeria Mendoza (${vp.name})`);
-    await page.fill("#customerPhone", "+57 310 555 9876");
-    await page.fill("#customerEmail", `valeria.${vp.name}@empresa.co`);
-    await page.fill("#companyName", "Andes Capital Partners");
-    await page.fill(
-      "#specialRequests",
-      "Requerimos pantalla para presentación breve, 2 menús vegetarianos y mesa imperial."
-    );
-    await page.check("#privacyAccepted");
-    await page.waitForTimeout(200);
+    // Fill out and submit the inquiry form on desktop
+    let refBadgeText = null;
+    let waLinkHref = null;
+    if (vp.name === "desktop") {
+      await page.fill("#eventType", `Cena Ejecutiva QA (${vp.name})`);
+      await page.fill("#guestCount", "28");
+      await page.fill("#customerName", `Valeria Mendoza (${vp.name})`);
+      await page.fill("#customerPhone", "+57 310 555 9876");
+      await page.fill("#customerEmail", `valeria.${vp.name}@empresa.co`);
+      await page.fill("#companyName", "Andes Capital Partners");
+      await page.fill(
+        "#specialRequests",
+        "Requerimos pantalla para presentación breve, 2 menús vegetarianos y mesa imperial."
+      );
+      await page.check("#privacyAccepted");
+      await page.waitForTimeout(200);
 
-    await page.click('button[type="submit"]');
-    // Wait for confirmation state
-    await page.waitForSelector("text=CÓDIGO DE SOLICITUD:", { timeout: 10000 });
-    await page.waitForTimeout(400);
+      await page.click('button[type="submit"]');
+      // Wait for confirmation state
+      await page.waitForSelector("text=CÓDIGO DE SOLICITUD:", { timeout: 10000 });
+      await page.waitForTimeout(400);
 
-    const refBadgeText = await page
-      .locator("text=CÓDIGO DE SOLICITUD:")
-      .first()
-      .textContent();
-    const waLinkHref = await page
-      .locator('a[href*="wa.me"]')
-      .first()
-      .getAttribute("href");
+      refBadgeText = await page
+        .locator("text=CÓDIGO DE SOLICITUD:")
+        .first()
+        .textContent();
+      waLinkHref = await page
+        .locator('a[href*="wa.me"]')
+        .first()
+        .getAttribute("href");
 
-    await page.screenshot({
-      path: path.join(
-        SCREENSHOT_DIR,
-        `10-eventos-${vp.name}-confirmation.png`
-      ),
-      fullPage: false,
-    });
+      await page.screenshot({
+        path: path.join(
+          SCREENSHOT_DIR,
+          `10-eventos-${vp.name}-confirmation.png`
+        ),
+        fullPage: false,
+      });
+    }
 
     // 4. Audit "/dashboard/casa-brasa"
     console.log(`[${vp.name}] Auditing /dashboard/casa-brasa...`);
     await page.goto(`${BASE_URL}/dashboard/casa-brasa`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
     });
     await page.waitForTimeout(500);
     await page.screenshot({
@@ -659,18 +677,142 @@ async function runAudit() {
       await collectPageMetrics(page, "/dashboard/casa-brasa", vp.name)
     );
 
-    // 5. Audit "/botanica-brunch" (Single-Location Demo Scenario)
+    // 5. Audit "/botanica-brunch" (Single-Location Demo Scenario: Home, Menu, Eventos, Dashboard)
     console.log(`[${vp.name}] Auditing /botanica-brunch (Single-Location Scenario)...`);
     await page.goto(`${BASE_URL}/botanica-brunch`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
     });
     await page.waitForTimeout(450);
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, `12-botanica-${vp.name}-single-location.png`),
       fullPage: true,
     });
+    if (vp.name === "desktop") {
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter6-after-botanica-home.png`),
+        fullPage: false,
+      });
+      const botSedes = page.locator("#sedes");
+      if ((await botSedes.count()) > 0) {
+        await botSedes.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(300);
+        await page.screenshot({
+          path: path.join(SCREENSHOT_DIR, `iter6-after-botanica-sede-split.png`),
+          fullPage: false,
+        });
+      }
+    }
     report.routeAudits.push(
       await collectPageMetrics(page, "/botanica-brunch", vp.name)
+    );
+
+    // 5b. Audit "/botanica-brunch/menu"
+    console.log(`[${vp.name}] Auditing /botanica-brunch/menu...`);
+    await page.goto(`${BASE_URL}/botanica-brunch/menu`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForTimeout(450);
+    if (vp.name === "desktop") {
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter6-after-botanica-menu.png`),
+        fullPage: false,
+      });
+      // Add an item to open Light-First drawer
+      const firstAddBtn = page.locator("article button", { hasText: "Mesa" }).first();
+      if ((await firstAddBtn.count()) > 0) {
+        await firstAddBtn.click();
+        await page.waitForTimeout(300);
+        const openDrawerBtn = page.locator("button", { hasText: "Mi Selección en Mesa" }).first();
+        if ((await openDrawerBtn.count()) > 0) {
+          await openDrawerBtn.click();
+          await page.waitForTimeout(350);
+          await page.screenshot({
+            path: path.join(SCREENSHOT_DIR, `iter6-after-botanica-menu-drawer.png`),
+            fullPage: false,
+          });
+          await page
+            .locator('[role="dialog"] button[aria-label*="Cerrar"]')
+            .first()
+            .evaluate((el) => el.click());
+          await page.waitForTimeout(200);
+        }
+      }
+    }
+    report.routeAudits.push(
+      await collectPageMetrics(page, "/botanica-brunch/menu", vp.name)
+    );
+
+    // 5c. Audit "/botanica-brunch/eventos" (Adaptive 2-column spaces & packages + Light-First form)
+    console.log(`[${vp.name}] Auditing /botanica-brunch/eventos...`);
+    await page.goto(`${BASE_URL}/botanica-brunch/eventos`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForTimeout(450);
+    if (vp.name === "desktop") {
+      const spacesH2 = page.locator("h2", { hasText: "Nuestros Salones" }).first();
+      if ((await spacesH2.count()) > 0) {
+        await spacesH2.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(250);
+      }
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter6-after-botanica-eventos-spaces.png`),
+        fullPage: false,
+      });
+
+      const pkgsH2 = page.locator("h2", { hasText: "Paquetes Comerciales" }).first();
+      if ((await pkgsH2.count()) > 0) {
+        await pkgsH2.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(250);
+      }
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter6-after-botanica-eventos-packages.png`),
+        fullPage: false,
+      });
+
+      // Click "Elegir este paquete para cotizar" on Brunch package to verify auto-select of 'breakfast'
+      const brunchPkgBtn = page.locator("button", { hasText: "Elegir este paquete" }).first();
+      if ((await brunchPkgBtn.count()) > 0) {
+        await brunchPkgBtn.click();
+        await page.waitForTimeout(350);
+      }
+
+      const botForm = page.locator("#solicitud-cotizacion-eventos");
+      if ((await botForm.count()) > 0) {
+        await botForm.scrollIntoViewIfNeeded();
+        await page.waitForTimeout(250);
+      }
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter6-after-botanica-eventos-form.png`),
+        fullPage: false,
+      });
+    }
+    report.routeAudits.push(
+      await collectPageMetrics(page, "/botanica-brunch/eventos", vp.name)
+    );
+
+    // 5d. Audit "/dashboard/botanica-brunch" (Botanical Theme + Real QR ISO/IEC 18004)
+    console.log(`[${vp.name}] Auditing /dashboard/botanica-brunch...`);
+    await page.goto(`${BASE_URL}/dashboard/botanica-brunch`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForTimeout(450);
+    if (vp.name === "desktop") {
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter6-after-botanica-dashboard.png`),
+        fullPage: false,
+      });
+      const botQrTab = page.locator('[role="tab"]', { hasText: "Códigos QR" }).first();
+      if ((await botQrTab.count()) > 0) {
+        await botQrTab.click();
+        await page.waitForTimeout(350);
+        await page.screenshot({
+          path: path.join(SCREENSHOT_DIR, `iter6-after-botanica-dashboard-qr.png`),
+          fullPage: false,
+        });
+      }
+    }
+    report.routeAudits.push(
+      await collectPageMetrics(page, "/dashboard/botanica-brunch", vp.name)
     );
 
     report.interactiveTests[vp.name] = {
@@ -700,6 +842,27 @@ async function runAudit() {
 
     await context.close();
   }
+
+  // Dedicated 820px Tablet Audit (Navbar & Adaptive 2-col Grids)
+  console.log(`[tablet-820] Auditing /botanica-brunch, /botanica-brunch/menu, /botanica-brunch/eventos...`);
+  const tabletCtx = await browser.newContext({
+    viewport: { width: 820, height: 1180 },
+    deviceScaleFactor: 2,
+    reducedMotion: "reduce",
+  });
+  const tabletPage = await tabletCtx.newPage();
+  for (const route of ["/botanica-brunch", "/botanica-brunch/menu", "/botanica-brunch/eventos", "/casa-brasa"]) {
+    await tabletPage.goto(`${BASE_URL}${route}`, { waitUntil: "domcontentloaded" });
+    await tabletPage.waitForTimeout(500);
+    if (route === "/botanica-brunch") {
+      await tabletPage.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter6-after-botanica-tablet-820.png`),
+        fullPage: false,
+      });
+    }
+    report.routeAudits.push(await collectPageMetrics(tabletPage, route, "tablet-820"));
+  }
+  await tabletCtx.close();
 
   await browser.close();
 

@@ -5,7 +5,6 @@ import Image from "next/image";
 import {
   Search,
   Sparkles,
-  Flame,
   Check,
   X,
   Camera,
@@ -31,6 +30,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
+import { BrandIcon } from "@/components/public/brand-icon";
 import {
   formatCurrency,
   buildWhatsAppUrl,
@@ -41,6 +41,7 @@ import type {
   ProductWithDetails,
   LocationRow,
   RestaurantDeliveryConfig,
+  TenantBrandIcon,
 } from "@/modules/tenant/queries";
 import type {
   FulfillmentType,
@@ -52,6 +53,9 @@ interface InteractiveMenuBrowserProps {
   restaurantId: string;
   restaurantSlug: string;
   restaurantName: string;
+  brandIcon?: TenantBrandIcon;
+  searchPlaceholder?: string;
+  signatureBadgeLabel?: string;
   menuTitle?: string;
   currencyCode: string;
   whatsappPhone?: string;
@@ -122,9 +126,12 @@ export function InteractiveMenuBrowser({
   restaurantId,
   restaurantSlug,
   restaurantName,
+  brandIcon = "utensils",
+  searchPlaceholder = "Buscar plato, bebida o ingrediente...",
+  signatureBadgeLabel = "Especialidad de la Casa",
   menuTitle = "Carta Principal",
   currencyCode,
-  whatsappPhone = "+573105550193",
+  whatsappPhone = "",
   privacyPolicyText = "Autorizo el uso de mis datos de contacto para gestionar la entrega de mi pedido.",
   deliveryConfig,
   authenticityBadge,
@@ -297,7 +304,6 @@ export function InteractiveMenuBrowser({
     deliveryNeighborhood,
   ]);
 
-  // Keep dispatch location aligned when user filters by a specific sede in the menu
   useEffect(() => {
     if (selectedLocationId !== "all") {
       setDispatchLocationId(selectedLocationId);
@@ -378,6 +384,17 @@ export function InteractiveMenuBrowser({
     dietaryTag,
   ]);
 
+  function handleSelectCategoryTab(slug: string) {
+    setActiveCategorySlug(slug);
+    const anchor = document.getElementById("menu-categories-anchor");
+    if (anchor) {
+      const rect = anchor.getBoundingClientRect();
+      if (rect.top < 0) {
+        anchor.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+  }
+
   function openProductDetail(product: ProductWithDetails) {
     const initialSelections: Record<string, string> = {};
     for (const grp of product.optionGroups) {
@@ -456,15 +473,20 @@ export function InteractiveMenuBrowser({
 
   function updateTableItemQuantity(key: string, delta: number) {
     setConfirmedOrder(null);
-    setTableSelection((prev) =>
-      prev
+    setTableSelection((prev) => {
+      const next = prev
         .map((item) =>
           item.key === key
             ? { ...item, quantity: item.quantity + delta }
             : item
         )
-        .filter((item) => item.quantity > 0)
-    );
+        .filter((item) => item.quantity > 0);
+
+      if (next.length === 0) {
+        setIsTableSheetOpen(false);
+      }
+      return next;
+    });
   }
 
   const totalTableItems = useMemo(
@@ -517,7 +539,6 @@ export function InteractiveMenuBrowser({
 
   const directOrderTotal = tableSubtotal + computedDeliveryFee;
 
-  // Check if any item in the bag belongs exclusively to a DIFFERENT sede than the chosen dispatch sede
   const conflictingLocationItems = useMemo(() => {
     if (
       fulfillmentType === "dine_in" ||
@@ -551,7 +572,7 @@ export function InteractiveMenuBrowser({
     dispatchLocationObj?.whatsapp_phone || whatsappPhone;
 
   const shareSelectionWhatsAppUrl = useMemo(() => {
-    if (tableSelection.length === 0) return "#";
+    if (tableSelection.length === 0 || !targetWhatsAppPhone) return null;
     const lines = tableSelection.map(
       (item) =>
         `• ${item.quantity}x ${item.name}${
@@ -573,9 +594,10 @@ export function InteractiveMenuBrowser({
         splitPeopleCount === 1 ? "comensal" : "comensales"
       }): *${formatCurrency(perPersonAmount, currencyCode)}*`;
 
-    return buildWhatsAppUrl(whatsappPhone, message);
+    return buildWhatsAppUrl(targetWhatsAppPhone, message);
   }, [
     tableSelection,
+    targetWhatsAppPhone,
     tableNumber,
     restaurantName,
     currencyCode,
@@ -583,7 +605,6 @@ export function InteractiveMenuBrowser({
     tableTotalWithTip,
     splitPeopleCount,
     perPersonAmount,
-    whatsappPhone,
   ]);
 
   function copyTransferInstructions() {
@@ -712,7 +733,9 @@ export function InteractiveMenuBrowser({
       const waMessage = [
         modeHeadline,
         `Restaurante: *${restaurantName}*${
-          dispatchLocationObj ? ` (${dispatchLocationObj.name})` : ""
+          dispatchLocationObj && locations.length > 1
+            ? ` (${dispatchLocationObj.name})`
+            : ""
         }`,
         `Cliente: *${customerName.trim()}* (${customerPhone.trim()})`,
         fulfillmentType === "delivery"
@@ -740,7 +763,9 @@ export function InteractiveMenuBrowser({
         .filter((line): line is string => line !== null)
         .join("\n");
 
-      const waUrl = buildWhatsAppUrl(targetWhatsAppPhone, waMessage);
+      const waUrl = targetWhatsAppPhone
+        ? buildWhatsAppUrl(targetWhatsAppPhone, waMessage)
+        : "#";
 
       setConfirmedOrder({
         referenceCode: refCode,
@@ -757,6 +782,18 @@ export function InteractiveMenuBrowser({
   const quickAddButtonLabel =
     fulfillmentType === "dine_in" ? "Mi Mesa" : "Pedir";
 
+  const enabledModesCount =
+    1 +
+    Number(deliveryConfig.enabled) +
+    Number(deliveryConfig.pickupEnabled);
+
+  const drawerModeCols =
+    enabledModesCount === 3
+      ? "grid-cols-3"
+      : enabledModesCount === 2
+        ? "grid-cols-2"
+        : "grid-cols-1";
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 pb-28 sm:px-6 sm:py-10 sm:pb-28">
       {/* Editorial Menu Header */}
@@ -764,15 +801,15 @@ export function InteractiveMenuBrowser({
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             {authenticityBadge && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-obsidian px-3 py-1 text-xs font-medium text-ivory">
-                <Camera className="size-3.5 text-ember-glow" />
-                {authenticityBadge}
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-ember/25 bg-surface-accent px-3 py-1 text-xs font-semibold text-ember">
+                <Camera className="size-3.5 shrink-0" />
+                <span>{authenticityBadge}</span>
               </span>
             )}
             {scheduleLabel && (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-canvas-elevated px-3 py-1 text-xs text-ink-muted">
-                <Clock className="size-3.5 text-ember" />
-                {scheduleLabel}
+                <Clock className="size-3.5 shrink-0 text-ember" />
+                <span>{scheduleLabel}</span>
               </span>
             )}
           </div>
@@ -784,22 +821,23 @@ export function InteractiveMenuBrowser({
         {/* Search & Quick Filter Controls */}
         <div className="flex flex-col gap-2.5 sm:items-end">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative min-w-[260px] sm:min-w-[280px]">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
+            <div className="relative min-w-[260px] sm:min-w-[290px]">
+              <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-muted" />
               <input
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Buscar corte, ingrediente o vino..."
+                placeholder={searchPlaceholder}
                 aria-label="Buscar en la carta"
-                className="h-11 w-full rounded-full border border-hairline bg-canvas-elevated pl-10 pr-9 text-sm text-ink placeholder:text-ink-muted/70 focus:border-ember focus:outline-none"
+                suppressHydrationWarning
+                className="h-11 w-full rounded-full border border-border-strong bg-canvas-elevated pr-9 pl-10 text-base text-ink placeholder:text-ink-subtle focus:border-ember focus:outline-none sm:text-sm"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery("")}
                   aria-label="Limpiar búsqueda"
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-ink-muted hover:text-ink"
+                  className="absolute top-1/2 right-2.5 -translate-y-1/2 rounded-full p-1 text-ink-muted hover:text-ink"
                 >
                   <X className="size-4" />
                 </button>
@@ -809,14 +847,14 @@ export function InteractiveMenuBrowser({
             <button
               type="button"
               onClick={() => setOnlyHighlights((prev) => !prev)}
-              className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
+              className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold transition ${
                 onlyHighlights
-                  ? "border-ember bg-ember text-ivory"
-                  : "border-hairline bg-canvas-elevated text-ink hover:border-ink/40"
+                  ? "border-ember bg-ember text-ivory shadow-2xs"
+                  : "border-border-strong bg-canvas-elevated text-ink hover:border-ember hover:text-ember"
               }`}
             >
               <Sparkles className="size-3.5 shrink-0" />
-              <span>Insignias del Chef</span>
+              <span>Recomendados</span>
             </button>
           </div>
 
@@ -826,7 +864,7 @@ export function InteractiveMenuBrowser({
               onClick={() => setOnlyAvailable((prev) => !prev)}
               className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                 onlyAvailable
-                  ? "border-obsidian bg-obsidian text-ivory"
+                  ? "border-ink bg-ink text-ivory"
                   : "border-hairline bg-canvas-elevated text-ink-muted hover:text-ink"
               }`}
             >
@@ -841,7 +879,7 @@ export function InteractiveMenuBrowser({
                   onClick={() => setDietaryTag(active ? null : tag)}
                   className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                     active
-                      ? "border-ember bg-ember/15 text-ember font-semibold"
+                      ? "border-ember bg-surface-accent text-ember font-semibold"
                       : "border-hairline bg-canvas-elevated text-ink-muted hover:text-ink"
                   }`}
                 >
@@ -855,7 +893,7 @@ export function InteractiveMenuBrowser({
 
       {/* Dual / Triple Customer Experience Switcher (Smart QR Context Detection) */}
       {(deliveryConfig.enabled || deliveryConfig.pickupEnabled) && (
-        <div className="mb-4 rounded-2xl border border-hairline bg-canvas-elevated p-3 sm:px-5 sm:py-3.5">
+        <div className="mb-4 rounded-2xl border border-hairline bg-canvas-elevated p-3.5 sm:px-5">
           {isQrTableSession && fulfillmentType === "dine_in" ? (
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-2 text-ink">
@@ -879,18 +917,24 @@ export function InteractiveMenuBrowser({
               )}
             </div>
           ) : (
-            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+            <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setFulfillmentType("dine_in")}
                   className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
                     fulfillmentType === "dine_in"
-                      ? "bg-obsidian text-ivory shadow-xs"
-                      : "bg-canvas text-ink-muted hover:text-ink"
+                      ? "bg-ink text-ivory shadow-2xs"
+                      : "border border-hairline bg-canvas text-ink-muted hover:text-ink"
                   }`}
                 >
-                  <UtensilsCrossed className="size-3.5 text-ember-glow" />
+                  <UtensilsCrossed
+                    className={`size-3.5 ${
+                      fulfillmentType === "dine_in"
+                        ? "text-gold"
+                        : "text-ember"
+                    }`}
+                  />
                   <span>En el Restaurante</span>
                 </button>
 
@@ -900,8 +944,8 @@ export function InteractiveMenuBrowser({
                     onClick={() => setFulfillmentType("delivery")}
                     className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
                       fulfillmentType === "delivery"
-                        ? "bg-ember text-ivory shadow-xs"
-                        : "bg-canvas text-ink-muted hover:text-ink"
+                        ? "bg-ember text-ivory shadow-2xs"
+                        : "border border-hairline bg-canvas text-ink-muted hover:text-ink"
                     }`}
                   >
                     <Bike className="size-3.5" />
@@ -915,8 +959,8 @@ export function InteractiveMenuBrowser({
                     onClick={() => setFulfillmentType("pickup")}
                     className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
                       fulfillmentType === "pickup"
-                        ? "bg-ember text-ivory shadow-xs"
-                        : "bg-canvas text-ink-muted hover:text-ink"
+                        ? "bg-ember text-ivory shadow-2xs"
+                        : "border border-hairline bg-canvas text-ink-muted hover:text-ink"
                     }`}
                   >
                     <ShoppingBag className="size-3.5" />
@@ -925,7 +969,7 @@ export function InteractiveMenuBrowser({
                 )}
               </div>
 
-              <div className="text-xs text-ink-muted">
+              <div className="text-xs leading-relaxed text-ink-muted">
                 {fulfillmentType === "dine_in" && (
                   <span>
                     Pre-selecciona platos, divide la cuenta exacta o muéstrale a
@@ -934,7 +978,7 @@ export function InteractiveMenuBrowser({
                 )}
                 {fulfillmentType === "delivery" && (
                   <span>
-                    <strong className="text-ink">
+                    <strong className="font-semibold text-ink">
                       Envío directo ({deliveryConfig.estimatedDeliveryMinutes}):
                     </strong>{" "}
                     {formatCurrency(deliveryConfig.deliveryFee, currencyCode)} ·{" "}
@@ -945,15 +989,15 @@ export function InteractiveMenuBrowser({
                         currencyCode
                       )}
                     </span>{" "}
-                    · Pago en Efectivo, Datáfono o Transferencia.
+                    · Efectivo, Datáfono o Transferencia.
                   </span>
                 )}
                 {fulfillmentType === "pickup" && (
                   <span>
-                    <strong className="text-ink">
+                    <strong className="font-semibold text-ink">
                       Listo en {deliveryConfig.estimatedPickupMinutes}:
                     </strong>{" "}
-                    Sin costo de domicilio · Recoge directo en sede.
+                    Sin recargos · Recoge directo en el restaurante.
                   </span>
                 )}
               </div>
@@ -962,9 +1006,9 @@ export function InteractiveMenuBrowser({
         </div>
       )}
 
-      {/* Multi-Location Menu Selector & Differential Banner (Only rendered if restaurant has >1 location) */}
+      {/* Multi-Location Menu Selector (Hidden automatically when restaurant has 1 location) */}
       {locations.length > 1 && (
-        <div className="mb-5 rounded-2xl border border-hairline bg-canvas-elevated p-3.5 sm:px-5 sm:py-3.5">
+        <div className="mb-5 rounded-2xl border border-hairline bg-canvas-elevated p-3.5 sm:px-5">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div className="flex items-center gap-2 text-xs">
               <MapPin className="size-4 shrink-0 text-ember" />
@@ -977,9 +1021,9 @@ export function InteractiveMenuBrowser({
               <button
                 type="button"
                 onClick={() => setSelectedLocationId("all")}
-                className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
                   selectedLocationId === "all"
-                    ? "bg-obsidian text-ivory shadow-xs"
+                    ? "bg-ink text-ivory shadow-2xs"
                     : "bg-canvas-muted text-ink-muted hover:text-ink"
                 }`}
               >
@@ -990,9 +1034,9 @@ export function InteractiveMenuBrowser({
                   key={loc.id}
                   type="button"
                   onClick={() => setSelectedLocationId(loc.id)}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
                     selectedLocationId === loc.id
-                      ? "bg-ember text-ivory shadow-xs"
+                      ? "bg-ember text-ivory shadow-2xs"
                       : "bg-canvas-muted text-ink-muted hover:text-ink"
                   }`}
                 >
@@ -1006,12 +1050,14 @@ export function InteractiveMenuBrowser({
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-2.5 text-xs text-ink-muted">
               <p>
                 Mostrando la carta disponible en{" "}
-                <strong className="text-ink">{activeLocationObj.name}</strong> (
-                {activeLocationObj.address_line}). Incluye cortes compartidos y
-                especialidades exclusivas de esta sede.
+                <strong className="font-semibold text-ink">
+                  {activeLocationObj.name}
+                </strong>{" "}
+                ({activeLocationObj.address_line}), incluyendo platos
+                compartidos y creaciones exclusivas de esta sede.
               </p>
               {activeLocationObj.exclusive_features?.length > 0 && (
-                <span className="rounded-full bg-ember/10 px-2.5 py-0.5 text-[11px] font-semibold text-ember">
+                <span className="rounded-full border border-ember/25 bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
                   Diferencial: {activeLocationObj.exclusive_features[0]}
                 </span>
               )}
@@ -1020,20 +1066,22 @@ export function InteractiveMenuBrowser({
         </div>
       )}
 
-      {/* Sticky Category Bar (Zero-Splash Mobile-First Navigation) */}
+      <div id="menu-categories-anchor" className="scroll-mt-32 lg:scroll-mt-24" />
+
+      {/* Sticky Category Bar (Calibrated to Navbar Heights across Mobile, Tablet & Desktop) */}
       <div
         role="tablist"
         aria-label="Categorías de la carta"
-        className="sticky top-[105px] sm:top-[69px] z-30 -mx-4 mb-8 flex gap-2 overflow-x-auto border-b border-hairline bg-canvas/95 px-4 py-2.5 backdrop-blur-md sm:mx-0 sm:rounded-2xl sm:border sm:px-3 sm:py-3"
+        className="sticky top-[118px] lg:top-[75px] z-30 -mx-4 mb-8 flex gap-2 overflow-x-auto border-b border-hairline bg-canvas/95 px-4 py-2.5 backdrop-blur-md sm:mx-0 sm:rounded-2xl sm:border sm:px-3 sm:py-3"
       >
         <button
           type="button"
           role="tab"
           aria-selected={activeCategorySlug === "all"}
-          onClick={() => setActiveCategorySlug("all")}
-          className={`min-h-11 shrink-0 rounded-full px-4 py-2 text-sm font-medium transition ${
+          onClick={() => handleSelectCategoryTab("all")}
+          className={`min-h-10 shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition ${
             activeCategorySlug === "all"
-              ? "bg-obsidian text-ivory shadow-sm"
+              ? "bg-ink text-ivory shadow-2xs"
               : "bg-canvas-elevated text-ink-muted hover:text-ink"
           }`}
         >
@@ -1045,10 +1093,10 @@ export function InteractiveMenuBrowser({
             type="button"
             role="tab"
             aria-selected={activeCategorySlug === cat.slug}
-            onClick={() => setActiveCategorySlug(cat.slug)}
-            className={`min-h-11 shrink-0 rounded-full px-4 py-2 text-sm font-medium transition ${
+            onClick={() => handleSelectCategoryTab(cat.slug)}
+            className={`min-h-10 shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition ${
               activeCategorySlug === cat.slug
-                ? "bg-obsidian text-ivory shadow-sm"
+                ? "bg-ember text-ivory shadow-2xs"
                 : "bg-canvas-elevated text-ink-muted hover:text-ink"
             }`}
           >
@@ -1065,8 +1113,8 @@ export function InteractiveMenuBrowser({
             No encontramos platos que coincidan con tu filtro
           </h2>
           <p className="mx-auto mt-1 max-w-md text-sm text-ink-muted">
-            Prueba buscando otro corte, ingrediente o restablece los filtros
-            para explorar toda nuestra carta.
+            Prueba buscando otro plato o restablece los filtros activos para
+            explorar toda nuestra carta.
           </p>
           <button
             type="button"
@@ -1078,7 +1126,7 @@ export function InteractiveMenuBrowser({
               setSelectedLocationId("all");
               setActiveCategorySlug("all");
             }}
-            className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-full bg-obsidian px-5 py-2.5 text-sm font-medium text-ivory transition hover:bg-ember"
+            className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-full bg-ember px-5 py-2.5 text-sm font-semibold text-ivory transition hover:bg-ember-hover"
           >
             Mostrar toda la carta
           </button>
@@ -1087,47 +1135,175 @@ export function InteractiveMenuBrowser({
 
       {/* Category Sections */}
       <div className="flex flex-col gap-14">
-        {filteredCategories.map((category, categoryIndex) => (
-          <section
-            key={category.id}
-            id={`categoria-${category.slug}`}
-            className="scroll-mt-44 sm:scroll-mt-36"
-          >
-            <div className="mb-6 border-b border-hairline pb-3">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="font-display text-3xl font-semibold text-ink sm:text-4xl">
-                  {category.name}
-                </h2>
-                {category.subtitle && (
-                  <span className="text-xs font-medium uppercase tracking-[0.14em] text-ember">
-                    {category.subtitle}
-                  </span>
+        {filteredCategories.map((category, categoryIndex) => {
+          const isSingleItemCategory = category.products.length === 1;
+
+          return (
+            <section
+              key={category.id}
+              id={`categoria-${category.slug}`}
+              className="scroll-mt-44 lg:scroll-mt-36"
+            >
+              <div className="mb-6 border-b border-hairline pb-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 className="font-display text-3xl font-semibold text-ink sm:text-4xl">
+                    {category.name}
+                  </h2>
+                  {category.subtitle && (
+                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-ember">
+                      {category.subtitle}
+                    </span>
+                  )}
+                </div>
+                {category.description && (
+                  <p className="mt-1 max-w-2xl text-sm text-ink-muted">
+                    {category.description}
+                  </p>
                 )}
               </div>
-              {category.description && (
-                <p className="mt-1 max-w-2xl text-sm text-ink-muted">
-                  {category.description}
-                </p>
-              )}
-            </div>
 
-            {category.display_mode === "compact_list" ? (
-              /* Editorial Wine & Sides List with Rounded Square Reference Thumbnails */
-              <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5 sm:p-8">
-                <div className="mb-5 flex flex-wrap items-center justify-between gap-2 border-b border-hairline pb-3 text-xs font-semibold uppercase tracking-[0.15em] text-ink-muted">
-                  <div className="flex items-center gap-2">
-                    <Wine className="size-4 text-ember" />
-                    <span>
-                      Selección de Cava & Guarniciones con Referencia Visual
+              {category.display_mode === "compact_list" ? (
+                /* Editorial Wine & Sides List with Rounded Square Reference Thumbnails */
+                <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5 sm:p-8">
+                  <div className="mb-5 flex flex-wrap items-center justify-between gap-2 border-b border-hairline pb-3 text-xs font-semibold uppercase tracking-[0.14em] text-ink-muted">
+                    <div className="flex items-center gap-2">
+                      <Wine className="size-4 text-ember" />
+                      <span>Selección de Cava & Acompañamientos</span>
+                    </div>
+                    <span className="text-xs font-normal normal-case tracking-normal text-ink-muted">
+                      Toca cualquier referencia para ampliar su nota de cata
                     </span>
                   </div>
-                  <span className="text-[11px] font-normal normal-case tracking-normal text-ink-muted">
-                    Toca cualquier vino o guarnición para ampliar su fotografía
-                  </span>
-                </div>
 
-                <div className="grid grid-cols-1 gap-x-8 gap-y-5 md:grid-cols-2">
-                  {category.products.map((product) => {
+                  <div
+                    className={`grid grid-cols-1 gap-x-8 gap-y-5 ${
+                      isSingleItemCategory ? "" : "md:grid-cols-2"
+                    }`}
+                  >
+                    {category.products.map((product) => {
+                      const isSoldOut =
+                        product.availability_status === "sold_out";
+                      const exclusiveLoc = product.exclusive_location_id
+                        ? locationMap.get(product.exclusive_location_id)
+                        : null;
+
+                      return (
+                        <div
+                          key={product.id}
+                          onClick={() => openProductDetail(product)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openProductDetail(product);
+                            }
+                          }}
+                          className={`group flex items-start gap-4 rounded-2xl border border-hairline bg-canvas p-3.5 text-left transition cursor-pointer ${
+                            isSoldOut
+                              ? "border-dashed bg-canvas-muted/50"
+                              : "hover:border-ember hover:shadow-2xs"
+                          }`}
+                        >
+                          {product.image_url ? (
+                            <div
+                              className={`relative size-20 sm:size-24 shrink-0 overflow-hidden rounded-2xl border border-hairline bg-canvas-muted shadow-2xs ${
+                                isSoldOut ? "grayscale-[55%] opacity-75" : ""
+                              }`}
+                            >
+                              <Image
+                                src={product.image_url}
+                                alt={product.image_alt ?? product.name}
+                                fill
+                                sizes="96px"
+                                className="object-cover transition duration-500 group-hover:scale-105"
+                              />
+                            </div>
+                          ) : (
+                            <div className="flex size-20 sm:size-24 shrink-0 items-center justify-center rounded-2xl border border-hairline bg-canvas-muted text-ember">
+                              <Wine className="size-6" />
+                            </div>
+                          )}
+
+                          <div className="flex min-w-0 flex-1 flex-col justify-between">
+                            <div>
+                              <div className="flex items-baseline justify-between gap-2">
+                                <h3 className="font-semibold text-ink transition group-hover:text-ember leading-snug">
+                                  {product.name}
+                                </h3>
+                                <span className="tabular-price shrink-0 font-mono text-sm sm:text-base font-semibold text-ember">
+                                  {formatCurrency(
+                                    Number(product.base_price),
+                                    currencyCode
+                                  )}
+                                </span>
+                              </div>
+
+                              {product.short_description && (
+                                <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-ink-muted">
+                                  {product.short_description}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {isSoldOut && (
+                                  <span className="rounded-full bg-amber-warn/15 px-2.5 py-0.5 text-xs font-semibold text-amber-warn">
+                                    Agotado hoy
+                                  </span>
+                                )}
+                                {product.portion_label && (
+                                  <span className="text-xs font-medium text-ink-muted">
+                                    {product.portion_label}
+                                  </span>
+                                )}
+                                {exclusiveLoc && locations.length > 1 && (
+                                  <span className="rounded-full bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
+                                    Exclusivo {exclusiveLoc.name}
+                                  </span>
+                                )}
+                                {product.badges.slice(0, 2).map((badge) => (
+                                  <span
+                                    key={badge}
+                                    className="rounded-full bg-canvas-muted px-2.5 py-0.5 text-xs font-medium text-ink-muted"
+                                  >
+                                    {badge}
+                                  </span>
+                                ))}
+                              </div>
+
+                              {!isSoldOut && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    addProductToTableSelection(product);
+                                  }}
+                                  aria-label={`Agregar ${product.name}`}
+                                  className="inline-flex min-h-8 items-center gap-1 rounded-full border border-border-strong bg-canvas-elevated px-3 py-1 text-xs font-semibold text-ink transition hover:border-ember hover:bg-ember hover:text-ivory"
+                                >
+                                  <Plus className="size-3.5" />
+                                  <span>{quickAddButtonLabel}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                /* High-Impact Editorial Photo Grid (Single-Item Categories Expand Horizontally) */
+                <div
+                  className={
+                    isSingleItemCategory
+                      ? "grid grid-cols-1 gap-6"
+                      : "grid grid-cols-1 gap-6 md:grid-cols-2"
+                  }
+                >
+                  {category.products.map((product, productIndex) => {
                     const isSoldOut =
                       product.availability_status === "sold_out";
                     const exclusiveLoc = product.exclusive_location_id
@@ -1135,7 +1311,7 @@ export function InteractiveMenuBrowser({
                       : null;
 
                     return (
-                      <div
+                      <article
                         key={product.id}
                         onClick={() => openProductDetail(product)}
                         role="button"
@@ -1146,286 +1322,211 @@ export function InteractiveMenuBrowser({
                             openProductDetail(product);
                           }
                         }}
-                        className={`group flex items-start gap-4 rounded-2xl border border-dashed border-hairline bg-canvas/50 p-3.5 text-left transition cursor-pointer ${
+                        className={`group relative overflow-hidden rounded-3xl border bg-canvas-elevated transition duration-200 cursor-pointer ${
+                          isSingleItemCategory && product.image_url
+                            ? "grid grid-cols-1 lg:grid-cols-12"
+                            : "flex flex-col"
+                        } ${
                           isSoldOut
-                            ? "opacity-60"
-                            : "hover:border-ember hover:bg-canvas"
+                            ? "border-dashed border-border-strong"
+                            : "border-hairline hover:-translate-y-0.5 hover:border-ember/50 hover:shadow-lg"
                         }`}
                       >
-                        {product.image_url ? (
-                          <div className="relative size-20 sm:size-24 shrink-0 overflow-hidden rounded-2xl border border-hairline bg-obsidian shadow-xs">
+                        {product.image_url && (
+                          <div
+                            className={`relative w-full overflow-hidden bg-canvas-muted ${
+                              isSingleItemCategory
+                                ? "aspect-[16/10] lg:col-span-6 lg:aspect-auto lg:min-h-[290px]"
+                                : "aspect-[16/10]"
+                            }`}
+                          >
                             <Image
                               src={product.image_url}
                               alt={product.image_alt ?? product.name}
                               fill
-                              sizes="96px"
-                              className="object-cover transition duration-500 group-hover:scale-105"
+                              priority={categoryIndex === 0 && productIndex < 2}
+                              sizes="(max-width: 768px) 100vw, 50vw"
+                              className={`object-cover transition duration-500 ${
+                                isSoldOut
+                                  ? "grayscale-[55%] opacity-80"
+                                  : "group-hover:scale-105"
+                              }`}
                             />
-                          </div>
-                        ) : (
-                          <div className="flex size-20 sm:size-24 shrink-0 items-center justify-center rounded-2xl border border-hairline bg-canvas-muted text-ember">
-                            <Wine className="size-6" />
-                          </div>
-                        )}
+                            <div className="absolute inset-0 bg-gradient-to-t from-obsidian/70 via-transparent to-transparent" />
 
-                        <div className="flex min-w-0 flex-1 flex-col justify-between">
-                          <div>
-                            <div className="flex items-baseline justify-between gap-2">
-                              <h3 className="font-semibold text-ink group-hover:text-ember transition leading-snug">
-                                {product.name}
-                              </h3>
-                              <span className="tabular-price shrink-0 font-mono text-sm sm:text-base font-semibold text-ink">
+                            {/* Top Badges */}
+                            <div className="absolute top-3.5 left-3.5 flex flex-wrap gap-1.5">
+                              {isSoldOut ? (
+                                <span className="rounded-full border border-obsidian-border bg-obsidian/92 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-amber-on-dark">
+                                  Agotado por hoy
+                                </span>
+                              ) : (
+                                <>
+                                  {product.is_chef_choice && (
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-gold/30 bg-obsidian/90 px-3 py-1 text-xs font-medium text-gold">
+                                      <BrandIcon
+                                        icon={brandIcon}
+                                        className="size-3.5 text-ember-glow"
+                                      />
+                                      <span>{signatureBadgeLabel}</span>
+                                    </span>
+                                  )}
+                                  {product.is_new && (
+                                    <span className="rounded-full bg-ember px-3 py-1 text-xs font-semibold text-ivory">
+                                      Nuevo
+                                    </span>
+                                  )}
+                                  {exclusiveLoc && locations.length > 1 && (
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-obsidian-border bg-obsidian/90 px-3 py-1 text-xs font-medium text-ivory">
+                                      <MapPin className="size-3 text-gold" />
+                                      <span>Exclusivo {exclusiveLoc.name}</span>
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+
+                            {/* Price Pill Overlay */}
+                            <div className="absolute right-3.5 bottom-3 rounded-full border border-obsidian-border bg-obsidian/92 px-3.5 py-1.5 backdrop-blur-xs">
+                              <span className="tabular-price font-mono text-sm font-semibold text-ivory">
                                 {formatCurrency(
                                   Number(product.base_price),
                                   currencyCode
                                 )}
                               </span>
                             </div>
+                          </div>
+                        )}
+
+                        <div
+                          className={`flex flex-1 flex-col justify-between p-5 sm:p-6 ${
+                            isSingleItemCategory && product.image_url
+                              ? "lg:col-span-6 lg:p-8"
+                              : ""
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-start justify-between gap-3">
+                              <h3 className="font-display text-2xl font-semibold text-ink transition group-hover:text-ember sm:text-[26px]">
+                                {product.name}
+                              </h3>
+                              {!product.image_url && (
+                                <span className="tabular-price font-mono text-base font-semibold text-ember">
+                                  {formatCurrency(
+                                    Number(product.base_price),
+                                    currencyCode
+                                  )}
+                                </span>
+                              )}
+                            </div>
 
                             {product.short_description && (
-                              <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-ink-muted">
+                              <p className="mt-2 text-sm leading-relaxed text-ink-muted">
                                 {product.short_description}
+                              </p>
+                            )}
+
+                            {isSingleItemCategory && product.pairing_note && (
+                              <p className="mt-3 rounded-xl border border-hairline bg-surface-accent/60 px-3.5 py-2.5 text-xs leading-relaxed text-ink-muted">
+                                <strong className="font-semibold text-ink">
+                                  Nota del Sommelier:
+                                </strong>{" "}
+                                {product.pairing_note}
                               </p>
                             )}
                           </div>
 
-                          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              {product.portion_label && (
-                                <span className="text-[11px] font-medium text-ink-muted">
-                                  {product.portion_label}
-                                </span>
-                              )}
-                              {exclusiveLoc && (
-                                <span className="rounded-full bg-ember/15 px-2 py-0.5 text-[10px] font-semibold text-ember">
-                                  Exclusivo {exclusiveLoc.name}
-                                </span>
-                              )}
-                              {product.badges.slice(0, 2).map((badge) => (
-                                <span
-                                  key={badge}
-                                  className="rounded-full bg-canvas-muted px-2 py-0.5 text-[10px] font-medium text-ink-muted"
-                                >
-                                  {badge}
-                                </span>
-                              ))}
-                            </div>
+                          <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-3.5">
+                            <span className="text-xs font-medium text-ink-muted">
+                              {isSoldOut
+                                ? "No disponible temporalmente"
+                                : (product.portion_label ??
+                                  "Preparado al momento")}
+                            </span>
 
-                            {!isSoldOut && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  addProductToTableSelection(product);
-                                }}
-                                aria-label={`Agregar ${product.name}`}
-                                className="inline-flex items-center gap-1 rounded-full border border-hairline bg-canvas-elevated px-2.5 py-1 text-[11px] font-semibold text-ink transition hover:border-ember hover:bg-ember hover:text-ivory"
-                              >
-                                <Plus className="size-3" />
-                                <span>{quickAddButtonLabel}</span>
-                              </button>
-                            )}
+                            <div className="flex items-center gap-2">
+                              {!isSoldOut && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (product.optionGroups.length > 0) {
+                                      openProductDetail(product);
+                                    } else {
+                                      addProductToTableSelection(product);
+                                    }
+                                  }}
+                                  className="inline-flex min-h-9 items-center gap-1 rounded-full border border-border-strong bg-canvas px-3.5 py-1.5 text-xs font-semibold text-ink transition hover:border-ember hover:bg-ember hover:text-ivory"
+                                >
+                                  <Plus className="size-3.5" />
+                                  <span>{quickAddButtonLabel}</span>
+                                </button>
+                              )}
+                              <span className="inline-flex items-center gap-1 text-xs font-semibold text-ember transition group-hover:translate-x-0.5">
+                                {product.optionGroups.length > 0
+                                  ? "Personalizar opciones"
+                                  : "Ver detalle"}
+                                <ChevronRight className="size-3.5" />
+                              </span>
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      </article>
                     );
                   })}
                 </div>
-              </div>
-            ) : (
-              /* High-Impact Editorial Photo Grid */
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                {category.products.map((product, productIndex) => {
-                  const isSoldOut = product.availability_status === "sold_out";
-                  const exclusiveLoc = product.exclusive_location_id
-                    ? locationMap.get(product.exclusive_location_id)
-                    : null;
-
-                  return (
-                    <article
-                      key={product.id}
-                      onClick={() => openProductDetail(product)}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          openProductDetail(product);
-                        }
-                      }}
-                      className={`group relative flex flex-col overflow-hidden rounded-3xl border border-hairline bg-canvas-elevated transition duration-200 cursor-pointer ${
-                        isSoldOut
-                          ? "opacity-75"
-                          : "hover:-translate-y-0.5 hover:border-ember/50 hover:shadow-lg"
-                      }`}
-                    >
-                      {product.image_url && (
-                        <div className="relative aspect-[16/10] w-full overflow-hidden bg-obsidian">
-                          <Image
-                            src={product.image_url}
-                            alt={product.image_alt ?? product.name}
-                            fill
-                            priority={categoryIndex === 0 && productIndex < 2}
-                            sizes="(max-width: 768px) 100vw, 50vw"
-                            className={`object-cover transition duration-500 ${
-                              isSoldOut
-                                ? "grayscale-[45%]"
-                                : "group-hover:scale-105"
-                            }`}
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-obsidian/70 via-transparent to-transparent" />
-
-                          {/* Top Badges */}
-                          <div className="absolute left-3.5 top-3.5 flex flex-wrap gap-1.5">
-                            {isSoldOut ? (
-                              <span className="rounded-full bg-obsidian/90 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-amber-warn border border-amber-warn/40">
-                                Agotado por hoy
-                              </span>
-                            ) : (
-                              <>
-                                {product.is_chef_choice && (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-obsidian/90 px-3 py-1 text-xs font-medium text-gold border border-gold/30">
-                                    <Flame className="size-3 text-ember-glow" />
-                                    Corte Insignia
-                                  </span>
-                                )}
-                                {product.is_new && (
-                                  <span className="rounded-full bg-ember px-3 py-1 text-xs font-semibold text-ivory">
-                                    Nuevo
-                                  </span>
-                                )}
-                                {exclusiveLoc && (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-obsidian/90 px-3 py-1 text-xs font-medium text-ivory border border-ember/50">
-                                    <MapPin className="size-3 text-ember-glow" />
-                                    Exclusivo {exclusiveLoc.name}
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </div>
-
-                          {/* Price Pill Overlay */}
-                          <div className="absolute bottom-3 right-3.5 rounded-full bg-obsidian/90 px-3.5 py-1.5 backdrop-blur-sm border border-obsidian-border">
-                            <span className="tabular-price font-mono text-sm font-semibold text-ivory">
-                              {formatCurrency(
-                                Number(product.base_price),
-                                currencyCode
-                              )}
-                            </span>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex flex-1 flex-col justify-between p-5 sm:p-6">
-                        <div>
-                          <div className="flex items-start justify-between gap-3">
-                            <h3 className="font-display text-2xl font-semibold text-ink group-hover:text-ember transition">
-                              {product.name}
-                            </h3>
-                            {!product.image_url && (
-                              <span className="tabular-price font-mono text-base font-semibold text-ink">
-                                {formatCurrency(
-                                  Number(product.base_price),
-                                  currencyCode
-                                )}
-                              </span>
-                            )}
-                          </div>
-
-                          {product.short_description && (
-                            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-                              {product.short_description}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-3.5">
-                          <span className="text-xs font-medium text-ink-muted">
-                            {product.portion_label ?? "Preparado al momento"}
-                          </span>
-
-                          <div className="flex items-center gap-2">
-                            {!isSoldOut && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (product.optionGroups.length > 0) {
-                                    openProductDetail(product);
-                                  } else {
-                                    addProductToTableSelection(product);
-                                  }
-                                }}
-                                className="inline-flex items-center gap-1 rounded-full border border-hairline bg-canvas px-3 py-1 text-xs font-semibold text-ink transition hover:border-ember hover:bg-ember hover:text-ivory"
-                              >
-                                <Plus className="size-3.5" />
-                                <span>{quickAddButtonLabel}</span>
-                              </button>
-                            )}
-                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-ember group-hover:translate-x-0.5 transition">
-                              {product.optionGroups.length > 0
-                                ? "Términos y guarniciones"
-                                : "Ver detalle"}
-                              <ChevronRight className="size-3.5" />
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        ))}
+              )}
+            </section>
+          );
+        })}
       </div>
 
       {/* Footer Service & Transparency Notes */}
       {(serviceChargeNote || serviceNotes) && (
-        <div className="mt-14 rounded-2xl border border-hairline bg-canvas-muted/60 p-5 text-xs text-ink-muted">
+        <div className="mt-14 rounded-2xl border border-hairline bg-canvas-elevated p-5 text-xs leading-relaxed text-ink-muted">
           <p className="font-semibold text-ink">{restaurantName}</p>
           {serviceChargeNote && <p className="mt-1">{serviceChargeNote}</p>}
           {serviceNotes && <p className="mt-1">{serviceNotes}</p>}
         </div>
       )}
 
-      {/* Floating Bottom Bar: Adapts cleanly to Dine-In vs Delivery vs Pickup */}
+      {/* Floating Bottom Bar: High-Contrast Pill Adapting to Dine-In vs Delivery vs Pickup */}
       {(totalTableItems > 0 || confirmedOrder) && (
-        <div className="fixed bottom-4 left-4 right-4 z-40 mx-auto max-w-xl">
+        <div className="fixed right-4 bottom-4 left-4 z-40 mx-auto max-w-xl">
           <button
             type="button"
             onClick={() => setIsTableSheetOpen(true)}
-            className="flex w-full items-center justify-between gap-3 rounded-2xl border border-gold/40 bg-obsidian px-5 py-3.5 text-ivory shadow-2xl transition hover:border-gold"
+            className="flex w-full items-center justify-between gap-3 rounded-2xl border border-obsidian-border bg-obsidian px-5 py-3.5 text-ivory shadow-2xl transition hover:border-gold"
           >
-            <div className="flex items-center gap-3 text-left">
+            <div className="flex min-w-0 items-center gap-3 text-left">
               <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-ember font-mono text-sm font-bold text-ivory">
                 {confirmedOrder ? "✓" : totalTableItems}
               </span>
-              <div>
-                <span className="block text-xs font-semibold uppercase tracking-wider text-gold">
+              <div className="min-w-0">
+                <span className="block truncate text-xs font-semibold uppercase tracking-wider text-gold">
                   {confirmedOrder
                     ? `Pedido Confirmado · ${confirmedOrder.referenceCode}`
                     : fulfillmentType === "delivery"
                       ? "Mi Pedido a Domicilio · Checkout Directo"
                       : fulfillmentType === "pickup"
-                        ? "Mi Pedido para Recoger en Sede"
+                        ? "Mi Pedido para Recoger"
                         : "Mi Selección en Mesa · Mostrar al Mesero"}
                 </span>
-                <span className="block text-xs text-ivory-muted">
+                <span className="block truncate text-xs text-ivory-muted">
                   {confirmedOrder
                     ? "Toca para ver el código o enviar por WhatsApp"
                     : fulfillmentType === "dine_in"
-                      ? "Divide cuenta, cambia a domicilio o comparte en WhatsApp"
+                      ? "Divide cuenta, cambia a domicilio o comparte"
                       : missingForFreeDelivery > 0
                         ? `Te faltan ${formatCurrency(
                             missingForFreeDelivery,
                             currencyCode
                           )} para envío gratis`
-                        : "Completa dirección y medio de pago (Efectivo, Datáfono o Transferencia)"}
+                        : "Completa entrega y medio de pago"}
                 </span>
               </div>
             </div>
-            <div className="text-right shrink-0">
+            <div className="shrink-0 text-right">
               <span className="tabular-price block font-mono text-base font-bold text-ivory">
                 {formatCurrency(
                   confirmedOrder
@@ -1434,8 +1535,8 @@ export function InteractiveMenuBrowser({
                   currencyCode
                 )}
               </span>
-              <span className="block text-[10px] text-ivory-muted">
-                {fulfillmentType === "dine_in" ? "Ver resumen >" : "Continuar >"}
+              <span className="block text-xs font-medium text-gold">
+                {fulfillmentType === "dine_in" ? "Ver lista →" : "Continuar →"}
               </span>
             </div>
           </button>
@@ -1452,21 +1553,21 @@ export function InteractiveMenuBrowser({
           onClick={() => setSelectedProduct(null)}
         >
           <div
-            className="relative flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-t-3xl border border-hairline bg-canvas-elevated shadow-2xl sm:rounded-3xl"
+            className="relative flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-t-3xl border border-hairline bg-canvas-elevated text-ink shadow-2xl sm:rounded-3xl"
             onClick={(e) => e.stopPropagation()}
           >
             <button
               type="button"
               onClick={() => setSelectedProduct(null)}
               aria-label="Cerrar detalle del plato"
-              className="absolute right-4 top-4 z-20 flex size-10 items-center justify-center rounded-full bg-obsidian/85 text-ivory shadow-md transition hover:bg-obsidian"
+              className="absolute top-4 right-4 z-20 flex size-10 items-center justify-center rounded-full bg-obsidian/85 text-ivory shadow-md transition hover:bg-obsidian"
             >
               <X className="size-5" />
             </button>
 
             <div className="flex-1 overflow-y-auto">
               {selectedProduct.image_url && (
-                <div className="relative h-48 sm:h-52 w-full bg-obsidian">
+                <div className="relative h-52 w-full bg-canvas-muted sm:h-56">
                   <Image
                     src={selectedProduct.image_url}
                     alt={selectedProduct.image_alt ?? selectedProduct.name}
@@ -1485,14 +1586,18 @@ export function InteractiveMenuBrowser({
                     </span>
                   )}
                   {selectedProduct.exclusive_location_id &&
+                    locations.length > 1 &&
                     locationMap.get(selectedProduct.exclusive_location_id) && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-ember/15 px-3 py-1 text-xs font-semibold text-ember">
-                        <MapPin className="size-3" />
-                        Exclusivo{" "}
-                        {
-                          locationMap.get(selectedProduct.exclusive_location_id)
-                            ?.name
-                        }
+                      <span className="inline-flex items-center gap-1 rounded-full bg-surface-accent px-3 py-1 text-xs font-semibold text-ember">
+                        <MapPin className="size-3.5" />
+                        <span>
+                          Exclusivo{" "}
+                          {
+                            locationMap.get(
+                              selectedProduct.exclusive_location_id
+                            )?.name
+                          }
+                        </span>
                       </span>
                     )}
                   {selectedProduct.badges.map((badge) => (
@@ -1507,7 +1612,7 @@ export function InteractiveMenuBrowser({
 
                 <h2
                   id="product-modal-title"
-                  className="mt-2 font-display text-2xl sm:text-3xl font-semibold text-ink"
+                  className="mt-2 font-display text-2xl font-semibold text-ink sm:text-3xl"
                 >
                   {selectedProduct.name}
                 </h2>
@@ -1521,9 +1626,9 @@ export function InteractiveMenuBrowser({
                   {selectedProduct.optionGroups.length > 0 && (
                     <a
                       href="#product-modal-options"
-                      className="inline-flex items-center gap-1 rounded-full bg-ember/15 px-3 py-0.5 text-[11px] font-semibold text-ember transition hover:bg-ember hover:text-ivory"
+                      className="inline-flex items-center gap-1 rounded-full bg-surface-accent px-3 py-1 text-xs font-semibold text-ember transition hover:bg-ember hover:text-ivory"
                     >
-                      <span>Personalizar término y guarnición ↓</span>
+                      <span>Personalizar opciones ↓</span>
                     </a>
                   )}
                 </div>
@@ -1534,13 +1639,13 @@ export function InteractiveMenuBrowser({
                 </p>
 
                 {selectedProduct.pairing_note && (
-                  <div className="mt-4 flex items-start gap-3 rounded-2xl border border-gold/30 bg-obsidian p-3.5 text-ivory">
-                    <Wine className="mt-0.5 size-4 shrink-0 text-gold" />
+                  <div className="mt-4 flex items-start gap-3 rounded-2xl border border-ember/25 bg-surface-accent/70 p-4 text-ink">
+                    <Wine className="mt-0.5 size-4 shrink-0 text-ember" />
                     <div>
-                      <span className="block text-[11px] font-semibold uppercase tracking-wider text-gold">
-                        Sugerencia de Maridaje · Sommelier
+                      <span className="block text-xs font-semibold uppercase tracking-wider text-ember">
+                        Sugerencia de Maridaje
                       </span>
-                      <p className="mt-0.5 text-xs leading-relaxed text-ivory-muted">
+                      <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">
                         {selectedProduct.pairing_note}
                       </p>
                     </div>
@@ -1559,7 +1664,7 @@ export function InteractiveMenuBrowser({
                             {group.name}
                           </h3>
                           {group.is_required && (
-                            <span className="shrink-0 rounded-full bg-obsidian px-2.5 py-0.5 text-[11px] font-medium text-ivory">
+                            <span className="shrink-0 rounded-full bg-ink px-2.5 py-0.5 text-xs font-medium text-ivory">
                               Requerido
                             </span>
                           )}
@@ -1587,8 +1692,8 @@ export function InteractiveMenuBrowser({
                                 }
                                 className={`flex min-h-11 items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left text-sm transition ${
                                   isSelected
-                                    ? "border-ember bg-ember/8 font-medium text-ink"
-                                    : "border-hairline bg-canvas text-ink-muted hover:border-ink/30"
+                                    ? "border-ember bg-surface-accent/70 font-semibold text-ink"
+                                    : "border-border-strong bg-canvas text-ink-muted hover:border-ember hover:text-ink"
                                 }`}
                               >
                                 <span className="flex items-center gap-2.5">
@@ -1599,7 +1704,9 @@ export function InteractiveMenuBrowser({
                                         : "border-ink-muted"
                                     }`}
                                   >
-                                    {isSelected && <Check className="size-2.5" />}
+                                    {isSelected && (
+                                      <Check className="size-2.5" />
+                                    )}
                                   </span>
                                   <span>{opt.name}</span>
                                 </span>
@@ -1619,7 +1726,7 @@ export function InteractiveMenuBrowser({
               </div>
             </div>
 
-            <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-hairline bg-canvas-elevated px-6 py-4 sm:px-7">
+            <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-hairline bg-canvas px-6 py-4 sm:px-7">
               <div>
                 <span className="block text-xs text-ink-muted">
                   Precio en carta{" "}
@@ -1627,7 +1734,7 @@ export function InteractiveMenuBrowser({
                     ? "con selección"
                     : ""}
                 </span>
-                <span className="tabular-price font-mono text-2xl font-semibold text-ink">
+                <span className="tabular-price font-mono text-2xl font-bold text-ink">
                   {formatCurrency(computedDetailPrice, currencyCode)}
                 </span>
               </div>
@@ -1652,7 +1759,7 @@ export function InteractiveMenuBrowser({
                       );
                       setSelectedProduct(null);
                     }}
-                    className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-ember px-5 py-2.5 text-xs sm:text-sm font-semibold text-ivory transition hover:bg-ember-hover"
+                    className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-ember px-5 py-2.5 text-sm font-semibold text-ivory shadow-xs transition hover:bg-ember-hover"
                   >
                     <Plus className="size-4" />
                     <span>
@@ -1666,9 +1773,9 @@ export function InteractiveMenuBrowser({
                 <button
                   type="button"
                   onClick={() => setSelectedProduct(null)}
-                  className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full bg-obsidian px-4 py-2.5 text-xs sm:text-sm font-medium text-ivory transition hover:bg-obsidian/80"
+                  className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full border border-border-strong bg-canvas-elevated px-4 py-2.5 text-sm font-semibold text-ink transition hover:border-ember hover:text-ember"
                 >
-                  Seguir explorando
+                  Seguir viendo
                 </button>
               </div>
             </div>
@@ -1676,32 +1783,34 @@ export function InteractiveMenuBrowser({
         </div>
       )}
 
-      {/* Dual Composer Sheet: Dine-In Shortlist & Bill Splitter OR Delivery/Pickup Checkout */}
+      {/* Light-First Order & Table Selection Drawer (High Readability & Clear Borders) */}
       {isTableSheetOpen && (
         <div
           role="dialog"
           aria-modal="true"
           aria-label="Resumen de Selección y Pedido"
-          className="fixed inset-0 z-50 flex items-end justify-center bg-obsidian/80 p-0 backdrop-blur-xs sm:items-center sm:p-4"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-obsidian/75 p-0 backdrop-blur-xs sm:items-center sm:p-4"
           onClick={() => setIsTableSheetOpen(false)}
         >
           <div
-            className="relative flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-t-3xl border border-obsidian-border bg-obsidian text-ivory shadow-2xl sm:rounded-3xl"
+            className="relative flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-t-3xl border border-hairline bg-canvas-elevated text-ink shadow-2xl sm:rounded-3xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header + 1-Tap Experience Switcher inside the Drawer */}
-            <div className="border-b border-obsidian-border px-6 py-4 space-y-3">
-              <div className="flex items-center justify-between">
+            {/* Header + Experience Mode Tabs */}
+            <div className="space-y-3 border-b border-hairline bg-canvas px-6 py-4">
+              <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
-                  {fulfillmentType === "delivery" ? (
-                    <Bike className="size-5 text-ember-glow" />
-                  ) : fulfillmentType === "pickup" ? (
-                    <ShoppingBag className="size-5 text-ember-glow" />
-                  ) : (
-                    <ClipboardList className="size-5 text-ember-glow" />
-                  )}
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-surface-accent text-ember">
+                    {fulfillmentType === "delivery" ? (
+                      <Bike className="size-5" />
+                    ) : fulfillmentType === "pickup" ? (
+                      <ShoppingBag className="size-5" />
+                    ) : (
+                      <ClipboardList className="size-5" />
+                    )}
+                  </div>
                   <div>
-                    <h2 className="font-display text-2xl font-semibold text-ivory">
+                    <h2 className="font-display text-2xl font-semibold text-ink">
                       {confirmedOrder
                         ? `Pedido Confirmado · ${confirmedOrder.referenceCode}`
                         : fulfillmentType === "delivery"
@@ -1710,9 +1819,9 @@ export function InteractiveMenuBrowser({
                             ? "Tu Pedido para Recoger"
                             : "Mi Selección en Mesa"}
                     </h2>
-                    <p className="text-xs text-ivory-muted">
+                    <p className="text-xs text-ink-muted">
                       {confirmedOrder
-                        ? "Registrado en el sistema del restaurante"
+                        ? "Registrado en el sistema oficial del restaurante"
                         : fulfillmentType === "dine_in"
                           ? "Muéstrale esta pantalla a tu mesero o divide la cuenta exacta"
                           : "Canal directo sin recargos · Pago contra entrega o transferencia"}
@@ -1723,107 +1832,108 @@ export function InteractiveMenuBrowser({
                   type="button"
                   onClick={() => setIsTableSheetOpen(false)}
                   aria-label="Cerrar resumen de pedido"
-                  className="flex size-9 items-center justify-center rounded-full bg-obsidian-card text-ivory-muted hover:text-ivory"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full border border-hairline bg-canvas-elevated text-ink-muted transition hover:border-ember hover:text-ink"
                 >
                   <X className="size-5" />
                 </button>
               </div>
 
-              {/* Mode Selector Pills inside Drawer */}
-              {!confirmedOrder &&
-                (deliveryConfig.enabled || deliveryConfig.pickupEnabled) && (
-                  <div
-                    role="tablist"
-                    aria-label="¿Dónde vas a disfrutar tu pedido?"
-                    className="grid grid-cols-3 gap-1.5 rounded-2xl border border-obsidian-border bg-obsidian-card p-1 text-xs"
+              {!confirmedOrder && enabledModesCount > 1 && (
+                <div
+                  role="tablist"
+                  aria-label="¿Dónde vas a disfrutar tu pedido?"
+                  className={`grid ${drawerModeCols} gap-1.5 rounded-2xl border border-hairline bg-canvas-muted/80 p-1 text-xs`}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={fulfillmentType === "dine_in"}
+                    onClick={() => {
+                      setFulfillmentType("dine_in");
+                      setCheckoutError(null);
+                    }}
+                    className={`flex items-center justify-center gap-1.5 rounded-xl py-2 font-semibold transition ${
+                      fulfillmentType === "dine_in"
+                        ? "bg-ink text-ivory shadow-2xs"
+                        : "text-ink-muted hover:text-ink"
+                    }`}
                   >
+                    <UtensilsCrossed className="size-3.5" />
+                    <span>En Mesa</span>
+                  </button>
+
+                  {deliveryConfig.enabled && (
                     <button
                       type="button"
                       role="tab"
-                      aria-selected={fulfillmentType === "dine_in"}
+                      aria-selected={fulfillmentType === "delivery"}
                       onClick={() => {
-                        setFulfillmentType("dine_in");
+                        setFulfillmentType("delivery");
                         setCheckoutError(null);
                       }}
                       className={`flex items-center justify-center gap-1.5 rounded-xl py-2 font-semibold transition ${
-                        fulfillmentType === "dine_in"
-                          ? "bg-ember text-ivory shadow-xs"
-                          : "text-ivory-muted hover:text-ivory"
+                        fulfillmentType === "delivery"
+                          ? "bg-ember text-ivory shadow-2xs"
+                          : "text-ink-muted hover:text-ink"
                       }`}
                     >
-                      <UtensilsCrossed className="size-3.5" />
-                      <span>En Mesa</span>
+                      <Bike className="size-3.5" />
+                      <span>Domicilio</span>
                     </button>
+                  )}
 
-                    {deliveryConfig.enabled && (
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={fulfillmentType === "delivery"}
-                        onClick={() => {
-                          setFulfillmentType("delivery");
-                          setCheckoutError(null);
-                        }}
-                        className={`flex items-center justify-center gap-1.5 rounded-xl py-2 font-semibold transition ${
-                          fulfillmentType === "delivery"
-                            ? "bg-ember text-ivory shadow-xs"
-                            : "text-ivory-muted hover:text-ivory"
-                        }`}
-                      >
-                        <Bike className="size-3.5" />
-                        <span>Domicilio</span>
-                      </button>
-                    )}
-
-                    {deliveryConfig.pickupEnabled && (
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={fulfillmentType === "pickup"}
-                        onClick={() => {
-                          setFulfillmentType("pickup");
-                          setCheckoutError(null);
-                        }}
-                        className={`flex items-center justify-center gap-1.5 rounded-xl py-2 font-semibold transition ${
-                          fulfillmentType === "pickup"
-                            ? "bg-ember text-ivory shadow-xs"
-                            : "text-ivory-muted hover:text-ivory"
-                        }`}
-                      >
-                        <ShoppingBag className="size-3.5" />
-                        <span>Recoger</span>
-                      </button>
-                    )}
-                  </div>
-                )}
+                  {deliveryConfig.pickupEnabled && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={fulfillmentType === "pickup"}
+                      onClick={() => {
+                        setFulfillmentType("pickup");
+                        setCheckoutError(null);
+                      }}
+                      className={`flex items-center justify-center gap-1.5 rounded-xl py-2 font-semibold transition ${
+                        fulfillmentType === "pickup"
+                          ? "bg-ember text-ivory shadow-2xs"
+                          : "text-ink-muted hover:text-ink"
+                      }`}
+                    >
+                      <ShoppingBag className="size-3.5" />
+                      <span>Recoger</span>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Confirmed Order State */}
             {confirmedOrder ? (
-              <div className="flex-1 overflow-y-auto p-6 space-y-5">
-                <div className="rounded-3xl border border-sage/40 bg-obsidian-card p-6 text-center space-y-3">
+              <div className="flex-1 space-y-5 overflow-y-auto p-6">
+                <div className="space-y-3 rounded-3xl border border-sage/35 bg-canvas p-6 text-center">
                   <CheckCircle2 className="mx-auto size-11 text-sage" />
-                  <span className="inline-block rounded-full bg-gold/15 px-3.5 py-1 font-mono text-xs font-bold text-gold">
+                  <span className="inline-block rounded-full border border-ember/30 bg-surface-accent px-3.5 py-1 font-mono text-xs font-bold text-ember">
                     CÓDIGO {confirmedOrder.referenceCode}
                   </span>
-                  <h3 className="font-display text-2xl font-semibold text-ivory">
+                  <h3 className="font-display text-2xl font-semibold text-ink">
                     ¡Recibimos tu pedido en cocina!
                   </h3>
-                  <p className="text-xs leading-relaxed text-ivory-muted">
+                  <p className="text-sm leading-relaxed text-ink-muted">
                     Tu orden por{" "}
-                    <strong className="text-ivory">
+                    <strong className="font-semibold text-ink">
                       {formatCurrency(confirmedOrder.totalAmount, currencyCode)}
                     </strong>{" "}
-                    ({confirmedOrder.paymentSummary}) quedó registrada en el
-                    sistema de <strong>{restaurantName}</strong>.
+                    ({confirmedOrder.paymentSummary}) quedó registrada en{" "}
+                    <strong className="font-semibold text-ink">
+                      {restaurantName}
+                    </strong>
+                    .
                   </p>
 
-                  <div className="pt-2 flex flex-col gap-2.5">
+                  <div className="flex flex-col gap-2.5 pt-2">
                     <a
                       href={confirmedOrder.whatsappUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-ember px-5 py-3 text-sm font-semibold text-ivory shadow-lg transition hover:bg-ember-hover"
+                      className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-ember px-5 py-3 text-sm font-semibold text-ivory shadow-md transition hover:bg-ember-hover"
                     >
                       <MessageCircle className="size-4" />
                       <span>
@@ -1837,7 +1947,7 @@ export function InteractiveMenuBrowser({
                         setConfirmedOrder(null);
                         setIsTableSheetOpen(false);
                       }}
-                      className="inline-flex min-h-10 w-full items-center justify-center rounded-full border border-obsidian-border text-xs font-semibold text-ivory-muted hover:text-ivory"
+                      className="inline-flex min-h-10 w-full items-center justify-center rounded-full border border-border-strong bg-canvas-elevated text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
                     >
                       Volver a la carta
                     </button>
@@ -1846,7 +1956,7 @@ export function InteractiveMenuBrowser({
               </div>
             ) : (
               /* Active Order / Table Shortlist Body */
-              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="flex-1 space-y-4 overflow-y-auto p-6">
                 {/* Itemized List */}
                 <div className="space-y-2.5">
                   {tableSelection.map((item) => {
@@ -1857,25 +1967,25 @@ export function InteractiveMenuBrowser({
                     return (
                       <div
                         key={item.key}
-                        className="flex items-start justify-between gap-3 rounded-2xl border border-obsidian-border bg-obsidian-card p-3.5"
+                        className="flex items-start justify-between gap-3 rounded-2xl border border-hairline bg-canvas p-3.5"
                       >
                         <div className="min-w-0 flex-1">
-                          <p className="font-display text-lg font-semibold text-ivory leading-snug">
+                          <p className="font-display text-lg font-semibold leading-snug text-ink">
                             {item.quantity}x {item.name}
                           </p>
                           {item.selectedOptionLabels.length > 0 && (
-                            <ul className="mt-1 space-y-0.5 text-xs text-gold">
+                            <ul className="mt-1 space-y-0.5 text-xs font-medium text-ember">
                               {item.selectedOptionLabels.map((lbl) => (
                                 <li key={lbl}>• {lbl}</li>
                               ))}
                             </ul>
                           )}
                           <div className="mt-1 flex flex-wrap items-center gap-2">
-                            <span className="tabular-price font-mono text-xs text-ivory-muted">
+                            <span className="tabular-price font-mono text-xs text-ink-muted">
                               {formatCurrency(item.unitPrice, currencyCode)} c/u
                             </span>
-                            {exclusiveLoc && (
-                              <span className="rounded-full bg-ember/20 px-2 py-0.5 text-[10px] font-semibold text-ember-glow">
+                            {exclusiveLoc && locations.length > 1 && (
+                              <span className="rounded-full bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
                                 Exclusivo {exclusiveLoc.name}
                               </span>
                             )}
@@ -1883,24 +1993,24 @@ export function InteractiveMenuBrowser({
                         </div>
 
                         <div className="flex flex-col items-end gap-2">
-                          <span className="tabular-price font-mono text-sm font-semibold text-ivory">
+                          <span className="tabular-price font-mono text-sm font-semibold text-ink">
                             {formatCurrency(
                               item.unitPrice * item.quantity,
                               currencyCode
                             )}
                           </span>
-                          <div className="flex items-center gap-1.5 rounded-full border border-obsidian-border bg-obsidian px-2 py-1">
+                          <div className="flex items-center gap-1.5 rounded-full border border-border-strong bg-canvas-elevated px-2 py-1">
                             <button
                               type="button"
                               aria-label={`Quitar una unidad de ${item.name}`}
                               onClick={() =>
                                 updateTableItemQuantity(item.key, -1)
                               }
-                              className="flex size-6 items-center justify-center rounded-full text-ivory-muted hover:bg-obsidian-card hover:text-ivory"
+                              className="flex size-6 items-center justify-center rounded-full text-ink-muted transition hover:bg-canvas-muted hover:text-ink"
                             >
-                              <Minus className="size-3" />
+                              <Minus className="size-3.5" />
                             </button>
-                            <span className="font-mono text-xs font-semibold px-1">
+                            <span className="px-1 font-mono text-xs font-semibold text-ink">
                               {item.quantity}
                             </span>
                             <button
@@ -1909,9 +2019,9 @@ export function InteractiveMenuBrowser({
                               onClick={() =>
                                 updateTableItemQuantity(item.key, 1)
                               }
-                              className="flex size-6 items-center justify-center rounded-full text-ivory-muted hover:bg-obsidian-card hover:text-ivory"
+                              className="flex size-6 items-center justify-center rounded-full text-ink-muted transition hover:bg-canvas-muted hover:text-ink"
                             >
-                              <Plus className="size-3" />
+                              <Plus className="size-3.5" />
                             </button>
                           </div>
                         </div>
@@ -1923,12 +2033,15 @@ export function InteractiveMenuBrowser({
                 {/* MODE 1: DINE-IN ("EN EL RESTAURANTE") */}
                 {fulfillmentType === "dine_in" ? (
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-obsidian-border bg-obsidian-card px-4 py-3">
+                    <div className="flex items-center justify-between gap-3 rounded-2xl border border-hairline bg-canvas px-4 py-3">
                       <label
                         htmlFor="dineInTableNumber"
-                        className="text-xs font-semibold uppercase tracking-wider text-ivory-muted"
+                        className="text-xs font-semibold text-ink"
                       >
-                        Número de mesa (opcional)
+                        Número de mesa{" "}
+                        <span className="font-normal text-ink-muted">
+                          (opcional)
+                        </span>
                       </label>
                       <input
                         id="dineInTableNumber"
@@ -1938,16 +2051,16 @@ export function InteractiveMenuBrowser({
                           setTableNumber(e.target.value.slice(0, 16))
                         }
                         placeholder="Ej. 12 o Terraza 3"
-                        className="h-9 w-36 rounded-xl border border-obsidian-border bg-obsidian px-3 text-right font-mono text-xs text-ivory placeholder:text-ivory-muted/40 focus:border-ember focus:outline-none"
+                        className="h-10 w-40 rounded-xl border border-border-strong bg-canvas-elevated px-3 text-right font-mono text-base text-ink placeholder:text-ink-subtle focus:border-ember focus:outline-none sm:text-xs"
                       />
                     </div>
 
                     {/* Flexible 1–30 Diners Bill Splitter & Service Tip Calculator */}
-                    <div className="rounded-2xl border border-gold/30 bg-obsidian-card/80 p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-obsidian-border pb-3">
-                        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gold">
-                          <Users className="size-3.5" />
-                          Dividir cuenta:
+                    <div className="rounded-2xl border border-ember/25 bg-surface-accent/60 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline pb-3">
+                        <span className="flex items-center gap-1.5 text-xs font-semibold text-ink">
+                          <Users className="size-4 text-ember" />
+                          <span>Dividir cuenta entre:</span>
                         </span>
                         <div className="flex flex-wrap items-center gap-1.5">
                           {[1, 2, 3, 4].map((n) => (
@@ -1957,25 +2070,25 @@ export function InteractiveMenuBrowser({
                               onClick={() => setSplitPeopleCount(n)}
                               className={`size-8 rounded-full font-mono text-xs font-semibold transition ${
                                 splitPeopleCount === n
-                                  ? "bg-ember text-ivory"
-                                  : "bg-obsidian text-ivory-muted hover:text-ivory"
+                                  ? "bg-ember text-ivory shadow-2xs"
+                                  : "border border-hairline bg-canvas text-ink-muted hover:text-ink"
                               }`}
                             >
                               {n}
                             </button>
                           ))}
-                          <div className="ml-1 flex items-center gap-1 rounded-full border border-obsidian-border bg-obsidian px-2 py-0.5">
+                          <div className="ml-1 flex items-center gap-1 rounded-full border border-border-strong bg-canvas px-2 py-0.5">
                             <button
                               type="button"
                               aria-label="Menos comensales"
                               onClick={() =>
                                 setSplitPeopleCount((c) => Math.max(1, c - 1))
                               }
-                              className="flex size-6 items-center justify-center rounded-full text-xs text-ivory-muted hover:text-ivory"
+                              className="flex size-6 items-center justify-center rounded-full text-sm font-bold text-ink-muted hover:text-ink"
                             >
                               −
                             </button>
-                            <span className="min-w-6 text-center font-mono text-xs font-bold text-gold">
+                            <span className="min-w-7 text-center font-mono text-xs font-bold text-ember">
                               {splitPeopleCount}p
                             </span>
                             <button
@@ -1984,7 +2097,7 @@ export function InteractiveMenuBrowser({
                               onClick={() =>
                                 setSplitPeopleCount((c) => Math.min(30, c + 1))
                               }
-                              className="flex size-6 items-center justify-center rounded-full text-xs text-ivory-muted hover:text-ivory"
+                              className="flex size-6 items-center justify-center rounded-full text-sm font-bold text-ink-muted hover:text-ink"
                             >
                               +
                             </button>
@@ -1992,7 +2105,7 @@ export function InteractiveMenuBrowser({
                         </div>
                       </div>
 
-                      <label className="mt-3 flex cursor-pointer items-center justify-between text-xs text-ivory-muted">
+                      <label className="mt-3 flex cursor-pointer items-center justify-between text-xs font-medium text-ink">
                         <span>Incluir servicio voluntario sugerido (10%)</span>
                         <input
                           type="checkbox"
@@ -2004,24 +2117,24 @@ export function InteractiveMenuBrowser({
                         />
                       </label>
 
-                      <div className="mt-3 flex items-baseline justify-between border-t border-obsidian-border pt-3">
+                      <div className="mt-3 flex items-baseline justify-between border-t border-hairline pt-3">
                         <div>
-                          <span className="block text-xs text-ivory-muted">
+                          <span className="block text-xs text-ink-muted">
                             Total estimado de la mesa
                           </span>
-                          <span className="tabular-price font-mono text-xl font-bold text-ivory">
+                          <span className="tabular-price font-mono text-xl font-bold text-ink">
                             {formatCurrency(tableTotalWithTip, currencyCode)}
                           </span>
                         </div>
                         <div className="text-right">
-                          <span className="block text-xs text-gold">
+                          <span className="block text-xs font-semibold text-ember">
                             Por persona ({splitPeopleCount}{" "}
                             {splitPeopleCount === 1
                               ? "comensal"
                               : "comensales"}
                             )
                           </span>
-                          <span className="tabular-price font-mono text-lg font-bold text-gold">
+                          <span className="tabular-price font-mono text-lg font-bold text-ember">
                             {formatCurrency(perPersonAmount, currencyCode)}
                           </span>
                         </div>
@@ -2033,13 +2146,13 @@ export function InteractiveMenuBrowser({
                   <form
                     id="direct-order-checkout-form"
                     onSubmit={handleConfirmDirectOrder}
-                    className="space-y-4 border-t border-obsidian-border pt-4"
+                    className="space-y-4 border-t border-hairline pt-4"
                   >
                     {/* Free Shipping / Min Order Commercial Indicator */}
                     {fulfillmentType === "delivery" && (
-                      <div className="rounded-2xl border border-obsidian-border bg-obsidian-card px-4 py-3 text-xs">
+                      <div className="rounded-2xl border border-hairline bg-canvas px-4 py-3 text-xs">
                         {missingForMinOrder > 0 ? (
-                          <p className="text-amber-warn font-medium">
+                          <p className="font-semibold text-amber-warn">
                             Pedido mínimo a domicilio:{" "}
                             <strong>
                               {formatCurrency(
@@ -2052,20 +2165,20 @@ export function InteractiveMenuBrowser({
                             más).
                           </p>
                         ) : qualifiesForFreeDelivery ? (
-                          <p className="text-sage font-semibold">
-                            ✓ ¡Tu pedido tiene envío SIN COSTO!
+                          <p className="font-semibold text-sage">
+                            ✓ ¡Tu pedido califica para envío SIN COSTO!
                           </p>
                         ) : (
-                          <p className="text-ivory-muted">
+                          <p className="text-ink-muted">
                             Costo de envío:{" "}
-                            <strong className="text-ivory">
+                            <strong className="font-semibold text-ink">
                               {formatCurrency(
                                 computedDeliveryFee,
                                 currencyCode
                               )}
                             </strong>{" "}
                             · Agrega{" "}
-                            <strong className="text-gold">
+                            <strong className="font-semibold text-ember">
                               {formatCurrency(
                                 missingForFreeDelivery,
                                 currencyCode
@@ -2082,7 +2195,7 @@ export function InteractiveMenuBrowser({
                       <div>
                         <label
                           htmlFor="dispatchLocationSelect"
-                          className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-ivory-muted"
+                          className="mb-1.5 block text-xs font-semibold text-ink"
                         >
                           {fulfillmentType === "delivery"
                             ? "Sede desde donde despachamos *"
@@ -2094,7 +2207,7 @@ export function InteractiveMenuBrowser({
                           onChange={(e) =>
                             setDispatchLocationId(e.target.value)
                           }
-                          className="h-10 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3 text-xs text-ivory focus:border-ember focus:outline-none"
+                          className="h-11 w-full rounded-xl border border-border-strong bg-canvas px-3 text-base text-ink focus:border-ember focus:outline-none sm:text-xs"
                         >
                           {locations.map((loc) => (
                             <option key={loc.id} value={loc.id}>
@@ -2104,11 +2217,11 @@ export function InteractiveMenuBrowser({
                         </select>
 
                         {conflictingLocationItems.length > 0 && (
-                          <div className="mt-2 rounded-xl border border-amber-warn/50 bg-amber-warn/15 p-3 text-xs text-ivory">
+                          <div className="mt-2 rounded-xl border border-amber-warn/40 bg-amber-warn/10 p-3 text-xs text-ink">
                             <p className="font-semibold text-amber-warn">
                               Atención: Plato exclusivo de otra sede
                             </p>
-                            <p className="mt-0.5 text-ivory-muted">
+                            <p className="mt-0.5 text-ink-muted">
                               <strong>
                                 {conflictingLocationItems
                                   .map((i) => i.name)
@@ -2131,7 +2244,7 @@ export function InteractiveMenuBrowser({
                                       .exclusiveLocationId!
                                   )
                                 }
-                                className="mt-2 rounded-full bg-ember px-3 py-1 text-[11px] font-semibold text-ivory"
+                                className="mt-2 rounded-full bg-ember px-3 py-1 text-xs font-semibold text-ivory"
                               >
                                 Cambiar despacho a{" "}
                                 {
@@ -2147,13 +2260,13 @@ export function InteractiveMenuBrowser({
                       </div>
                     ) : (
                       dispatchLocationObj && (
-                        <div className="flex items-center gap-2 rounded-xl border border-obsidian-border bg-obsidian-card px-3.5 py-2.5 text-xs text-ivory-muted">
-                          <MapPin className="size-3.5 shrink-0 text-ember-glow" />
+                        <div className="flex items-center gap-2 rounded-xl border border-hairline bg-canvas px-3.5 py-2.5 text-xs text-ink-muted">
+                          <MapPin className="size-4 shrink-0 text-ember" />
                           <span>
                             {fulfillmentType === "delivery"
                               ? "Despacho directo desde"
                               : "Punto de recogida:"}{" "}
-                            <strong className="text-ivory">
+                            <strong className="font-semibold text-ink">
                               {dispatchLocationObj.name}
                             </strong>{" "}
                             ({dispatchLocationObj.address_line})
@@ -2167,9 +2280,9 @@ export function InteractiveMenuBrowser({
                       <div>
                         <label
                           htmlFor="orderCustomerName"
-                          className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ivory-muted"
+                          className="mb-1 block text-xs font-semibold text-ink"
                         >
-                          Tu nombre *
+                          Tu nombre <span className="text-ember">*</span>
                         </label>
                         <input
                           id="orderCustomerName"
@@ -2178,16 +2291,17 @@ export function InteractiveMenuBrowser({
                           value={customerName}
                           onChange={(e) => setCustomerName(e.target.value)}
                           placeholder="Ej. Alejandro Gómez"
-                          className="h-10 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3 text-xs text-ivory placeholder:text-ivory-muted/40 focus:border-ember focus:outline-none"
+                          className="h-11 w-full rounded-xl border border-border-strong bg-canvas px-3 text-base text-ink placeholder:text-ink-subtle focus:border-ember focus:outline-none sm:text-xs"
                         />
                       </div>
 
                       <div>
                         <label
                           htmlFor="orderCustomerPhone"
-                          className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ivory-muted"
+                          className="mb-1 block text-xs font-semibold text-ink"
                         >
-                          WhatsApp / Celular *
+                          WhatsApp / Celular{" "}
+                          <span className="text-ember">*</span>
                         </label>
                         <input
                           id="orderCustomerPhone"
@@ -2196,7 +2310,7 @@ export function InteractiveMenuBrowser({
                           value={customerPhone}
                           onChange={(e) => setCustomerPhone(e.target.value)}
                           placeholder="310 555 0199"
-                          className="h-10 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3 font-mono text-xs text-ivory placeholder:text-ivory-muted/40 focus:border-ember focus:outline-none"
+                          className="h-11 w-full rounded-xl border border-border-strong bg-canvas px-3 font-mono text-base text-ink placeholder:text-ink-subtle focus:border-ember focus:outline-none sm:text-xs"
                         />
                       </div>
                     </div>
@@ -2207,9 +2321,10 @@ export function InteractiveMenuBrowser({
                         <div className="sm:col-span-2">
                           <label
                             htmlFor="orderDeliveryAddress"
-                            className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ivory-muted"
+                            className="mb-1 block text-xs font-semibold text-ink"
                           >
-                            Dirección exacta y Apto / Torre *
+                            Dirección exacta y Apto / Torre{" "}
+                            <span className="text-ember">*</span>
                           </label>
                           <input
                             id="orderDeliveryAddress"
@@ -2218,16 +2333,17 @@ export function InteractiveMenuBrowser({
                             value={deliveryAddress}
                             onChange={(e) => setDeliveryAddress(e.target.value)}
                             placeholder="Ej. Calle 94 # 11A-32 · Apto 502"
-                            className="h-10 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3 text-xs text-ivory placeholder:text-ivory-muted/40 focus:border-ember focus:outline-none"
+                            className="h-11 w-full rounded-xl border border-border-strong bg-canvas px-3 text-base text-ink placeholder:text-ink-subtle focus:border-ember focus:outline-none sm:text-xs"
                           />
                         </div>
 
                         <div>
                           <label
                             htmlFor="orderDeliveryNeighborhood"
-                            className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ivory-muted"
+                            className="mb-1 block text-xs font-semibold text-ink"
                           >
-                            Barrio / Sector *
+                            Barrio / Sector{" "}
+                            <span className="text-ember">*</span>
                           </label>
                           <input
                             id="orderDeliveryNeighborhood"
@@ -2238,7 +2354,7 @@ export function InteractiveMenuBrowser({
                               setDeliveryNeighborhood(e.target.value)
                             }
                             placeholder="Ej. Chicó Norte"
-                            className="h-10 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3 text-xs text-ivory placeholder:text-ivory-muted/40 focus:border-ember focus:outline-none"
+                            className="h-11 w-full rounded-xl border border-border-strong bg-canvas px-3 text-base text-ink placeholder:text-ink-subtle focus:border-ember focus:outline-none sm:text-xs"
                           />
                         </div>
                       </div>
@@ -2246,15 +2362,16 @@ export function InteractiveMenuBrowser({
                       <div>
                         <label
                           htmlFor="orderPickupSlot"
-                          className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ivory-muted"
+                          className="mb-1 block text-xs font-semibold text-ink"
                         >
-                          ¿En cuánto tiempo pasas a recoger? *
+                          ¿En cuánto tiempo pasas a recoger?{" "}
+                          <span className="text-ember">*</span>
                         </label>
                         <select
                           id="orderPickupSlot"
                           value={pickupSlot}
                           onChange={(e) => setPickupSlot(e.target.value)}
-                          className="h-10 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3 text-xs text-ivory focus:border-ember focus:outline-none"
+                          className="h-11 w-full rounded-xl border border-border-strong bg-canvas px-3 text-base text-ink focus:border-ember focus:outline-none sm:text-xs"
                         >
                           {PICKUP_SLOT_OPTIONS.map((slot) => (
                             <option key={slot} value={slot}>
@@ -2268,9 +2385,12 @@ export function InteractiveMenuBrowser({
                     <div>
                       <label
                         htmlFor="orderDeliveryNotes"
-                        className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-ivory-muted"
+                        className="mb-1 block text-xs font-semibold text-ink"
                       >
-                        Indicaciones de entrega o cocina (opcional)
+                        Indicaciones de entrega o cocina{" "}
+                        <span className="font-normal text-ink-muted">
+                          (opcional)
+                        </span>
                       </label>
                       <input
                         id="orderDeliveryNotes"
@@ -2278,14 +2398,15 @@ export function InteractiveMenuBrowser({
                         value={deliveryNotes}
                         onChange={(e) => setDeliveryNotes(e.target.value)}
                         placeholder="Ej. Portería sobre la carrera, salsas aparte, sin cebolla..."
-                        className="h-10 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3 text-xs text-ivory placeholder:text-ivory-muted/40 focus:border-ember focus:outline-none"
+                        className="h-11 w-full rounded-xl border border-border-strong bg-canvas px-3 text-base text-ink placeholder:text-ink-subtle focus:border-ember focus:outline-none sm:text-xs"
                       />
                     </div>
 
-                    {/* Payment Method Selector: Cash, Card/Dataphone, Bank Transfer */}
+                    {/* Payment Method Selector */}
                     <div className="space-y-2.5">
-                      <span className="block text-[11px] font-semibold uppercase tracking-wider text-gold">
-                        ¿Cómo deseas pagar tu pedido? *
+                      <span className="block text-xs font-semibold text-ink">
+                        ¿Cómo deseas pagar tu pedido?{" "}
+                        <span className="text-ember">*</span>
                       </span>
 
                       <div className="grid grid-cols-3 gap-2">
@@ -2294,11 +2415,11 @@ export function InteractiveMenuBrowser({
                           onClick={() => setPaymentMethod("cash")}
                           className={`flex flex-col items-center justify-center gap-1 rounded-2xl border p-3 text-xs font-semibold transition ${
                             paymentMethod === "cash"
-                              ? "border-ember bg-ember/15 text-ivory"
-                              : "border-obsidian-border bg-obsidian-card text-ivory-muted hover:text-ivory"
+                              ? "border-ember bg-surface-accent text-ink shadow-2xs"
+                              : "border-border-strong bg-canvas text-ink-muted hover:text-ink"
                           }`}
                         >
-                          <Banknote className="size-4 text-ember-glow" />
+                          <Banknote className="size-4 text-ember" />
                           <span>Efectivo</span>
                         </button>
 
@@ -2307,11 +2428,11 @@ export function InteractiveMenuBrowser({
                           onClick={() => setPaymentMethod("card_dataphone")}
                           className={`flex flex-col items-center justify-center gap-1 rounded-2xl border p-3 text-xs font-semibold transition ${
                             paymentMethod === "card_dataphone"
-                              ? "border-ember bg-ember/15 text-ivory"
-                              : "border-obsidian-border bg-obsidian-card text-ivory-muted hover:text-ivory"
+                              ? "border-ember bg-surface-accent text-ink shadow-2xs"
+                              : "border-border-strong bg-canvas text-ink-muted hover:text-ink"
                           }`}
                         >
-                          <CreditCard className="size-4 text-ember-glow" />
+                          <CreditCard className="size-4 text-ember" />
                           <span>Tarjeta</span>
                         </button>
 
@@ -2320,18 +2441,17 @@ export function InteractiveMenuBrowser({
                           onClick={() => setPaymentMethod("transfer")}
                           className={`flex flex-col items-center justify-center gap-1 rounded-2xl border p-3 text-xs font-semibold transition ${
                             paymentMethod === "transfer"
-                              ? "border-ember bg-ember/15 text-ivory"
-                              : "border-obsidian-border bg-obsidian-card text-ivory-muted hover:text-ivory"
+                              ? "border-ember bg-surface-accent text-ink shadow-2xs"
+                              : "border-border-strong bg-canvas text-ink-muted hover:text-ink"
                           }`}
                         >
-                          <Smartphone className="size-4 text-ember-glow" />
+                          <Smartphone className="size-4 text-ember" />
                           <span>Transferencia</span>
                         </button>
                       </div>
 
-                      {/* Contextual Payment Details Box */}
                       {paymentMethod === "cash" && (
-                        <div className="rounded-2xl border border-obsidian-border bg-obsidian-card p-3.5 space-y-2.5 text-xs">
+                        <div className="space-y-2.5 rounded-2xl border border-hairline bg-canvas p-3.5 text-xs">
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
@@ -2339,10 +2459,10 @@ export function InteractiveMenuBrowser({
                                 setCashNeedsChange(false);
                                 setCashBillInput("");
                               }}
-                              className={`rounded-full px-3 py-1 font-semibold transition ${
+                              className={`rounded-full border px-3 py-1 font-semibold transition ${
                                 !cashNeedsChange
-                                  ? "bg-obsidian text-gold border border-gold/40"
-                                  : "bg-obsidian/50 text-ivory-muted"
+                                  ? "border-ink bg-ink text-ivory"
+                                  : "border-border-strong bg-canvas-elevated text-ink-muted hover:text-ink"
                               }`}
                             >
                               Entrego valor exacto
@@ -2350,10 +2470,10 @@ export function InteractiveMenuBrowser({
                             <button
                               type="button"
                               onClick={() => setCashNeedsChange(true)}
-                              className={`rounded-full px-3 py-1 font-semibold transition ${
+                              className={`rounded-full border px-3 py-1 font-semibold transition ${
                                 cashNeedsChange
-                                  ? "bg-obsidian text-gold border border-gold/40"
-                                  : "bg-obsidian/50 text-ivory-muted"
+                                  ? "border-ink bg-ink text-ivory"
+                                  : "border-border-strong bg-canvas-elevated text-ink-muted hover:text-ink"
                               }`}
                             >
                               Necesito vueltas / cambio
@@ -2370,10 +2490,10 @@ export function InteractiveMenuBrowser({
                                     onClick={() =>
                                       setCashBillInput(String(amt))
                                     }
-                                    className={`rounded-full border px-2.5 py-1 font-mono text-[11px] transition ${
+                                    className={`rounded-full border px-3 py-1 font-mono text-xs font-semibold transition ${
                                       cashBillNumeric === amt
                                         ? "border-ember bg-ember text-ivory"
-                                        : "border-obsidian-border bg-obsidian text-ivory-muted"
+                                        : "border-border-strong bg-canvas-elevated text-ink-muted hover:text-ink"
                                     }`}
                                   >
                                     {formatCurrency(amt, currencyCode)}
@@ -2394,7 +2514,7 @@ export function InteractiveMenuBrowser({
                                     )
                                   }
                                   placeholder="¿Con cuánto pagas? Ej. 200000"
-                                  className="h-9 flex-1 rounded-xl border border-obsidian-border bg-obsidian px-3 font-mono text-xs text-ivory placeholder:text-ivory-muted/40 focus:border-ember focus:outline-none"
+                                  className="h-10 flex-1 rounded-xl border border-border-strong bg-canvas-elevated px-3 font-mono text-base text-ink placeholder:text-ink-subtle focus:border-ember focus:outline-none sm:text-xs"
                                 />
                                 {cashBillNumeric >= directOrderTotal && (
                                   <span className="shrink-0 font-mono text-xs font-semibold text-sage">
@@ -2412,8 +2532,8 @@ export function InteractiveMenuBrowser({
                       )}
 
                       {paymentMethod === "card_dataphone" && (
-                        <div className="rounded-2xl border border-obsidian-border bg-obsidian-card p-3.5 flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <span className="text-ivory-muted">
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-hairline bg-canvas p-3.5 text-xs">
+                          <span className="text-ink-muted">
                             Enviamos datáfono inalámbrico:
                           </span>
                           <div className="flex gap-1.5">
@@ -2422,10 +2542,10 @@ export function InteractiveMenuBrowser({
                                 key={t}
                                 type="button"
                                 onClick={() => setCardType(t)}
-                                className={`rounded-full px-3 py-1 font-semibold transition ${
+                                className={`rounded-full border px-3 py-1 font-semibold transition ${
                                   cardType === t
-                                    ? "bg-ember text-ivory"
-                                    : "bg-obsidian text-ivory-muted"
+                                    ? "border-ember bg-ember text-ivory"
+                                    : "border-border-strong bg-canvas-elevated text-ink-muted hover:text-ink"
                                 }`}
                               >
                                 {t}
@@ -2436,30 +2556,30 @@ export function InteractiveMenuBrowser({
                       )}
 
                       {paymentMethod === "transfer" && (
-                        <div className="rounded-2xl border border-gold/30 bg-obsidian-card p-3.5 space-y-2 text-xs">
+                        <div className="space-y-2 rounded-2xl border border-ember/25 bg-surface-accent/65 p-3.5 text-xs">
                           <div className="flex items-start justify-between gap-2">
-                            <p className="font-mono text-[11px] leading-relaxed text-ivory">
+                            <p className="font-mono text-xs leading-relaxed text-ink">
                               {deliveryConfig.transferInstructions}
                             </p>
                             <button
                               type="button"
                               onClick={copyTransferInstructions}
-                              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-obsidian-border bg-obsidian px-2.5 py-1 text-[11px] font-semibold text-gold hover:border-gold"
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border-strong bg-canvas px-3 py-1 text-xs font-semibold text-ember transition hover:border-ember"
                             >
                               {copiedTransfer ? (
                                 <>
-                                  <Check className="size-3 text-sage" />
+                                  <Check className="size-3.5 text-sage" />
                                   <span>Copiado</span>
                                 </>
                               ) : (
                                 <>
-                                  <Copy className="size-3" />
+                                  <Copy className="size-3.5" />
                                   <span>Copiar</span>
                                 </>
                               )}
                             </button>
                           </div>
-                          <p className="text-[11px] text-ivory-muted">
+                          <p className="text-xs text-ink-muted">
                             Al confirmar se generará tu código de orden y podrás
                             adjuntar el comprobante directo en nuestro WhatsApp.
                           </p>
@@ -2468,42 +2588,44 @@ export function InteractiveMenuBrowser({
                     </div>
 
                     {/* Totals Summary Card */}
-                    <div className="rounded-2xl border border-gold/30 bg-obsidian-card/90 p-4 space-y-1.5 text-xs">
-                      <div className="flex justify-between text-ivory-muted">
+                    <div className="space-y-1.5 rounded-2xl border border-ember/30 bg-surface-accent/65 p-4 text-xs">
+                      <div className="flex justify-between text-ink-muted">
                         <span>Subtotal platos ({totalTableItems})</span>
-                        <span className="tabular-price font-mono">
+                        <span className="tabular-price font-mono font-medium text-ink">
                           {formatCurrency(tableSubtotal, currencyCode)}
                         </span>
                       </div>
                       {fulfillmentType === "delivery" && (
-                        <div className="flex justify-between text-ivory-muted">
+                        <div className="flex justify-between text-ink-muted">
                           <span>Costo de domicilio</span>
                           <span className="tabular-price font-mono">
                             {computedDeliveryFee === 0 ? (
-                              <strong className="text-sage">SIN COSTO</strong>
+                              <strong className="font-semibold text-sage">
+                                SIN COSTO
+                              </strong>
                             ) : (
                               formatCurrency(computedDeliveryFee, currencyCode)
                             )}
                           </span>
                         </div>
                       )}
-                      <div className="flex items-baseline justify-between border-t border-obsidian-border pt-2">
-                        <span className="font-semibold text-ivory">
+                      <div className="flex items-baseline justify-between border-t border-hairline pt-2">
+                        <span className="text-sm font-semibold text-ink">
                           Total a pagar
                         </span>
-                        <span className="tabular-price font-mono text-xl font-bold text-gold">
+                        <span className="tabular-price font-mono text-xl font-bold text-ember">
                           {formatCurrency(directOrderTotal, currencyCode)}
                         </span>
                       </div>
                     </div>
 
                     {/* Privacy Consent */}
-                    <label className="flex cursor-pointer items-start gap-2.5 text-[11px] text-ivory-muted">
+                    <label className="flex cursor-pointer items-start gap-2.5 text-xs leading-relaxed text-ink-muted">
                       <input
                         type="checkbox"
                         checked={privacyAccepted}
                         onChange={(e) => setPrivacyAccepted(e.target.checked)}
-                        className="mt-0.5 size-3.5 accent-ember"
+                        className="mt-0.5 size-4 shrink-0 accent-ember"
                       />
                       <span>{privacyPolicyText}</span>
                     </label>
@@ -2511,7 +2633,7 @@ export function InteractiveMenuBrowser({
                     {checkoutError && (
                       <div
                         role="alert"
-                        className="rounded-xl border border-crimson/50 bg-crimson/15 px-3.5 py-2.5 text-xs font-medium text-ivory"
+                        className="rounded-xl border border-crimson/40 bg-crimson/10 px-3.5 py-2.5 text-xs font-semibold text-crimson"
                       >
                         {checkoutError}
                       </div>
@@ -2523,14 +2645,14 @@ export function InteractiveMenuBrowser({
 
             {/* Drawer Footer Actions */}
             {!confirmedOrder && (
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-obsidian-border bg-obsidian-card px-6 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline bg-canvas px-6 py-4">
                 <button
                   type="button"
                   onClick={() => {
                     setTableSelection([]);
                     setIsTableSheetOpen(false);
                   }}
-                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium text-ivory-muted hover:text-crimson"
+                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold text-ink-muted transition hover:text-crimson"
                 >
                   <Trash2 className="size-3.5" />
                   <span>Vaciar</span>
@@ -2538,19 +2660,21 @@ export function InteractiveMenuBrowser({
 
                 {fulfillmentType === "dine_in" ? (
                   <div className="flex items-center gap-2">
-                    <a
-                      href={shareSelectionWhatsAppUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
-                    >
-                      <MessageCircle className="size-3.5" />
-                      <span>Compartir por WhatsApp</span>
-                    </a>
+                    {shareSelectionWhatsAppUrl && (
+                      <a
+                        href={shareSelectionWhatsAppUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory shadow-xs transition hover:bg-ember-hover"
+                      >
+                        <MessageCircle className="size-3.5" />
+                        <span>Compartir por WhatsApp</span>
+                      </a>
+                    )}
                     <button
                       type="button"
                       onClick={() => setIsTableSheetOpen(false)}
-                      className="inline-flex min-h-10 items-center rounded-full border border-obsidian-border px-4 py-2 text-xs font-semibold text-ivory"
+                      className="inline-flex min-h-10 items-center rounded-full border border-border-strong bg-canvas-elevated px-4 py-2 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
                     >
                       Seguir viendo carta
                     </button>
@@ -2564,7 +2688,7 @@ export function InteractiveMenuBrowser({
                       missingForMinOrder > 0 ||
                       conflictingLocationItems.length > 0
                     }
-                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-ember px-6 py-2.5 text-xs sm:text-sm font-semibold text-ivory shadow-lg transition hover:bg-ember-hover disabled:opacity-50"
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-ember px-6 py-2.5 text-sm font-semibold text-ivory shadow-md transition hover:bg-ember-hover disabled:opacity-50"
                   >
                     <ShieldCheck className="size-4" />
                     <span>

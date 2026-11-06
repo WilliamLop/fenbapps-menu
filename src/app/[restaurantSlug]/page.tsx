@@ -1,25 +1,46 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import {
   UtensilsCrossed,
   Sparkles,
-  MapPin,
-  Clock,
-  Phone,
-  MessageCircle,
   Camera,
   Users,
   ArrowRight,
-  ShieldCheck,
 } from "lucide-react";
 import { getRestaurantBySlug } from "@/modules/tenant/queries";
 import { RestaurantNavbar } from "@/components/public/restaurant-navbar";
+import { RestaurantFooter } from "@/components/public/restaurant-footer";
 import { LocationsShowcase } from "@/components/public/locations-showcase";
-import { formatCurrency } from "@/lib/utils";
+import {
+  formatCurrency,
+  getAdaptiveThreeColumnGrid,
+} from "@/lib/utils";
 
 interface RestaurantPageProps {
   params: Promise<{ restaurantSlug: string }>;
+}
+
+export async function generateMetadata({
+  params,
+}: RestaurantPageProps): Promise<Metadata> {
+  const { restaurantSlug } = await params;
+  const data = await getRestaurantBySlug(restaurantSlug);
+
+  if (!data) {
+    return { title: "Restaurante" };
+  }
+
+  return {
+    title: `${data.restaurant.name} · ${
+      data.restaurant.cuisine_type ?? "Carta Digital & Eventos"
+    }`,
+    description:
+      data.restaurant.story_excerpt ??
+      data.restaurant.tagline ??
+      `Descubre la carta digital, domicilios directos y salones privados de ${data.restaurant.name}.`,
+  };
 }
 
 export default async function RestaurantCommercialPage({
@@ -42,35 +63,70 @@ export default async function RestaurantCommercialPage({
     eventSpaces,
   } = data;
 
+  const isSunlitHero = theme.heroStyle === "sunlit-editorial";
+  const featuredSlice = featuredProducts.slice(0, 3);
+  const totalMenuDishes = data.categories.reduce(
+    (acc, c) => acc + c.products.length,
+    0
+  );
+
   return (
-    <div className="min-h-screen flex flex-col bg-canvas">
+    <div
+      data-theme={theme.palette}
+      className="min-h-screen flex flex-col bg-canvas text-ink"
+    >
       <RestaurantNavbar
         slug={restaurant.slug}
         name={restaurant.name}
         cuisineType={restaurant.cuisine_type}
+        brandIcon={theme.brandIcon}
         isDemo={restaurant.is_demo}
         enabledModules={enabledModules}
         activeTab="site"
       />
 
       <main className="flex-1">
-        {/* Hero Editorial Section (Obsidian Night Atmosphere) */}
-        <section className="relative overflow-hidden bg-obsidian text-ivory border-b border-obsidian-border">
-          <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 px-4 py-12 sm:px-6 lg:grid-cols-12 lg:py-20">
+        {/* Adaptive Multi-Tenant Hero: Sunlit Editorial (Botánica) vs. Immersive Dark (Casa Brasa) */}
+        <section
+          className={
+            isSunlitHero
+              ? "relative overflow-hidden border-b border-hairline bg-gradient-to-br from-surface-accent/70 via-canvas to-canvas-elevated text-ink"
+              : "relative overflow-hidden border-b border-obsidian-border bg-obsidian text-ivory"
+          }
+        >
+          <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-10 px-4 py-12 sm:px-6 lg:grid-cols-12 lg:py-18">
             <div className="lg:col-span-7">
               {theme.authenticityBadge && (
-                <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-obsidian-border bg-obsidian-card px-3.5 py-1.5 text-xs font-medium text-gold">
-                  <Camera className="size-3.5 text-ember-glow" />
+                <div
+                  className={
+                    isSunlitHero
+                      ? "mb-4 inline-flex items-center gap-2 rounded-full border border-ember/25 bg-canvas-elevated px-3.5 py-1.5 text-xs font-semibold text-ember shadow-2xs"
+                      : "mb-4 inline-flex items-center gap-2 rounded-full border border-obsidian-border bg-obsidian-card px-3.5 py-1.5 text-xs font-medium text-gold"
+                  }
+                >
+                  <Camera
+                    className={`size-3.5 shrink-0 ${
+                      isSunlitHero ? "text-ember" : "text-ember-glow"
+                    }`}
+                  />
                   <span>{theme.authenticityBadge}</span>
                 </div>
               )}
 
-              <h1 className="font-display text-4xl font-semibold leading-[1.06] tracking-tight text-ivory sm:text-6xl">
+              <h1
+                className={`font-display text-4xl font-semibold leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl ${
+                  isSunlitHero ? "text-ink" : "text-ivory"
+                }`}
+              >
                 {restaurant.tagline ?? restaurant.name}
               </h1>
 
               {restaurant.story_excerpt && (
-                <p className="mt-5 max-w-xl text-base leading-relaxed text-ivory-muted">
+                <p
+                  className={`mt-5 max-w-xl text-base leading-relaxed sm:text-[17px] ${
+                    isSunlitHero ? "text-ink-muted" : "text-ivory-muted"
+                  }`}
+                >
                   {restaurant.story_excerpt}
                 </p>
               )}
@@ -79,9 +135,9 @@ export default async function RestaurantCommercialPage({
                 {enabledModules.menu && (
                   <Link
                     href={`/${restaurant.slug}/menu`}
-                    className="inline-flex min-h-12 items-center gap-2.5 rounded-full bg-ember px-7 py-3.5 text-sm font-semibold text-ivory shadow-lg transition hover:bg-ember-hover"
+                    className="inline-flex min-h-12 items-center gap-2.5 rounded-full bg-ember px-7 py-3.5 text-sm font-semibold text-ivory shadow-md transition hover:bg-ember-hover"
                   >
-                    <UtensilsCrossed className="size-4" />
+                    <UtensilsCrossed className="size-4 shrink-0" />
                     <span>Explorar Carta Digital</span>
                   </Link>
                 )}
@@ -89,37 +145,56 @@ export default async function RestaurantCommercialPage({
                 {enabledModules.events && (
                   <Link
                     href={`/${restaurant.slug}/eventos`}
-                    className="inline-flex min-h-12 items-center gap-2.5 rounded-full border border-obsidian-border bg-obsidian-card px-7 py-3.5 text-sm font-semibold text-ivory transition hover:border-gold hover:text-gold"
+                    className={
+                      isSunlitHero
+                        ? "inline-flex min-h-12 items-center gap-2.5 rounded-full border border-border-strong bg-canvas-elevated px-7 py-3.5 text-sm font-semibold text-ink shadow-2xs transition hover:border-ember hover:text-ember"
+                        : "inline-flex min-h-12 items-center gap-2.5 rounded-full border border-obsidian-border bg-obsidian-card px-7 py-3.5 text-sm font-semibold text-ivory transition hover:border-gold hover:text-gold"
+                    }
                   >
-                    <Sparkles className="size-4 text-gold" />
+                    <Sparkles
+                      className={`size-4 shrink-0 ${
+                        isSunlitHero ? "text-ember" : "text-gold"
+                      }`}
+                    />
                     <span>Salones Privados & Eventos</span>
                   </Link>
                 )}
               </div>
 
-              <div className="mt-10 grid grid-cols-3 gap-4 border-t border-obsidian-border pt-6 text-xs text-ivory-muted">
+              <div
+                className={`mt-10 grid grid-cols-3 gap-4 border-t pt-6 text-xs ${
+                  isSunlitHero
+                    ? "border-hairline text-ink-muted"
+                    : "border-obsidian-border text-ivory-muted"
+                }`}
+              >
                 <div>
-                  <span className="tabular-price block font-mono text-lg font-semibold text-ivory">
+                  <span
+                    className={`tabular-price block font-sans text-lg font-bold ${
+                      isSunlitHero ? "text-ink" : "text-ivory"
+                    }`}
+                  >
                     {restaurant.slug === "casa-brasa"
                       ? "28 – 45 Días"
-                      : `${data.categories.reduce(
-                          (acc, c) => acc + c.products.length,
-                          0
-                        )} Platos`}
+                      : `${totalMenuDishes} Creaciones`}
                   </span>
-                  <span>
+                  <span className="mt-0.5 block">
                     {restaurant.slug === "casa-brasa"
                       ? "Maduración Dry-Aged en casa"
                       : restaurant.cuisine_type ?? "Carta de Autor"}
                   </span>
                 </div>
                 <div>
-                  <span className="tabular-price block font-mono text-lg font-semibold text-ivory">
+                  <span
+                    className={`tabular-price block font-sans text-lg font-bold ${
+                      isSunlitHero ? "text-ink" : "text-ivory"
+                    }`}
+                  >
                     {locations.length === 1
-                      ? "1 Sola Sede"
+                      ? "Casa Única"
                       : `${locations.length} Sedes`}
                   </span>
-                  <span>
+                  <span className="mt-0.5 block">
                     {locations
                       .map(
                         (l) =>
@@ -129,7 +204,11 @@ export default async function RestaurantCommercialPage({
                   </span>
                 </div>
                 <div>
-                  <span className="tabular-price block font-mono text-lg font-semibold text-ivory">
+                  <span
+                    className={`tabular-price block font-sans text-lg font-bold ${
+                      isSunlitHero ? "text-ink" : "text-ivory"
+                    }`}
+                  >
                     {eventSpaces.length > 0
                       ? `${Math.min(
                           ...eventSpaces.map((s) => s.min_guests)
@@ -138,7 +217,7 @@ export default async function RestaurantCommercialPage({
                         )} Inv.`
                       : "Eventos"}
                   </span>
-                  <span>
+                  <span className="mt-0.5 block">
                     {eventSpaces.length === 1
                       ? "1 Salón Privado"
                       : `${eventSpaces.length} Salones Privados`}
@@ -148,187 +227,325 @@ export default async function RestaurantCommercialPage({
             </div>
 
             <div className="lg:col-span-5">
-              <div className="relative aspect-[4/5] w-full overflow-hidden rounded-3xl border border-obsidian-border bg-obsidian-card shadow-2xl">
-                <Image
-                  src={theme.heroImage ?? "/demo/casa-brasa/hero-steak.jpg"}
-                  alt={restaurant.name}
-                  fill
-                  priority
-                  sizes="(max-width: 1024px) 100vw, 45vw"
-                  className="object-cover"
+              <div
+                className={`relative aspect-[4/5] w-full overflow-hidden rounded-3xl border shadow-2xl ${
+                  isSunlitHero
+                    ? "border-hairline bg-canvas-muted"
+                    : "border-obsidian-border bg-obsidian-card"
+                }`}
+              >
+                {theme.heroImage && (
+                  <Image
+                    src={theme.heroImage}
+                    alt={restaurant.name}
+                    fill
+                    priority
+                    sizes="(max-width: 1024px) 100vw, 45vw"
+                    className="object-cover"
+                  />
+                )}
+                <div
+                  className={
+                    isSunlitHero
+                      ? "absolute inset-0 bg-gradient-to-t from-obsidian/55 via-transparent to-transparent"
+                      : "absolute inset-0 bg-gradient-to-t from-obsidian/85 via-transparent to-transparent"
+                  }
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-obsidian/85 via-transparent to-transparent" />
-                {featuredProducts[0] && (
-                  <div className="absolute bottom-5 left-5 right-5 rounded-2xl border border-obsidian-border/80 bg-obsidian/90 p-4 backdrop-blur-md">
-                    <span className="text-[11px] font-semibold uppercase tracking-widest text-ember-glow">
-                      Plato Insignia en Carta
+                {featuredSlice[0] && (
+                  <Link
+                    href={`/${restaurant.slug}/menu`}
+                    className={
+                      isSunlitHero
+                        ? "group absolute right-4 bottom-4 left-4 rounded-2xl border border-hairline bg-canvas-elevated/95 p-4 text-ink shadow-lg backdrop-blur-md transition hover:border-ember"
+                        : "group absolute right-5 bottom-5 left-5 rounded-2xl border border-obsidian-border/80 bg-obsidian/90 p-4 text-ivory backdrop-blur-md transition hover:border-gold"
+                    }
+                  >
+                    <span
+                      className={`text-xs font-semibold uppercase tracking-wider ${
+                        isSunlitHero ? "text-ember" : "text-ember-glow"
+                      }`}
+                    >
+                      {theme.signatureBadgeLabel} en Carta
                     </span>
-                    <div className="mt-1 flex items-baseline justify-between gap-2">
-                      <p className="font-display text-xl font-semibold text-ivory line-clamp-1">
-                        {featuredProducts[0].name}
+                    <div className="mt-1 flex items-baseline justify-between gap-3">
+                      <p className="font-display text-xl font-semibold line-clamp-1">
+                        {featuredSlice[0].name}
                       </p>
-                      <span className="tabular-price shrink-0 font-mono text-sm font-semibold text-gold">
+                      <span
+                        className={`tabular-price shrink-0 font-mono text-sm font-semibold ${
+                          isSunlitHero ? "text-ember" : "text-gold"
+                        }`}
+                      >
                         {formatCurrency(
-                          Number(featuredProducts[0].base_price),
+                          Number(featuredSlice[0].base_price),
                           restaurant.currency_code
                         )}
                       </span>
                     </div>
-                  </div>
+                  </Link>
                 )}
               </div>
             </div>
           </div>
         </section>
 
-        {/* Featured Culinary Creations */}
-        {enabledModules.menu && featuredProducts.length > 0 && (
+        {/* Featured Culinary Creations (Adaptive 1 / 2 / 3 Grid) */}
+        {enabledModules.menu && featuredSlice.length > 0 && (
           <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
             <div className="mb-10 flex flex-col justify-between gap-4 border-b border-hairline pb-5 sm:flex-row sm:items-end">
               <div>
-                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-ember">
-                  Selección del Chef Ejecutivo
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ember">
+                  Selección de Nuestra Cocina
                 </span>
                 <h2 className="mt-1 font-display text-3xl font-semibold text-ink sm:text-4xl">
-                  Platos & Coctelería Protagonista
+                  Creaciones Protagonistas en Carta
                 </h2>
               </div>
               <Link
                 href={`/${restaurant.slug}/menu`}
                 className="inline-flex items-center gap-1.5 text-sm font-semibold text-ember hover:underline"
               >
-                <span>Ver la carta completa con precios y términos</span>
+                <span>Explorar toda la carta y precios</span>
                 <ArrowRight className="size-4" />
               </Link>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-              {featuredProducts.slice(0, 3).map((product, idx) => (
-                <Link
-                  key={product.id}
-                  href={`/${restaurant.slug}/menu`}
-                  className="group flex flex-col overflow-hidden rounded-3xl border border-hairline bg-canvas-elevated transition hover:-translate-y-1 hover:border-ember/50 hover:shadow-lg"
-                >
-                  {product.image_url && (
-                    <div className="relative aspect-[4/3] w-full overflow-hidden bg-obsidian">
-                      <Image
-                        src={product.image_url}
-                        alt={product.image_alt ?? product.name}
-                        fill
-                        priority={idx < 2}
-                        sizes="(max-width: 768px) 100vw, 33vw"
-                        className="object-cover transition duration-500 group-hover:scale-105"
-                      />
-                    </div>
+            {featuredSlice.length === 1 && featuredSlice[0] ? (
+              <Link
+                href={`/${restaurant.slug}/menu`}
+                className="group grid grid-cols-1 overflow-hidden rounded-3xl border border-hairline bg-canvas-elevated shadow-xs transition hover:border-ember/50 hover:shadow-lg lg:grid-cols-12"
+              >
+                {featuredSlice[0].image_url && (
+                  <div className="relative aspect-[16/10] w-full overflow-hidden bg-canvas-muted lg:col-span-6 lg:aspect-auto lg:min-h-[300px]">
+                    <Image
+                      src={featuredSlice[0].image_url}
+                      alt={featuredSlice[0].image_alt ?? featuredSlice[0].name}
+                      fill
+                      priority
+                      sizes="(max-width: 1024px) 100vw, 50vw"
+                      className="object-cover transition duration-500 group-hover:scale-105"
+                    />
+                  </div>
+                )}
+                <div className="flex flex-col justify-center p-7 sm:p-9 lg:col-span-6">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-ember">
+                    {theme.signatureBadgeLabel}
+                  </span>
+                  <h3 className="mt-2 font-display text-3xl font-semibold text-ink transition group-hover:text-ember">
+                    {featuredSlice[0].name}
+                  </h3>
+                  {featuredSlice[0].short_description && (
+                    <p className="mt-3 text-base leading-relaxed text-ink-muted">
+                      {featuredSlice[0].short_description}
+                    </p>
                   )}
-                  <div className="flex flex-1 flex-col justify-between p-6">
-                    <div>
-                      <div className="flex items-baseline justify-between gap-2">
-                        <h3 className="font-display text-2xl font-semibold text-ink group-hover:text-ember transition">
-                          {product.name}
-                        </h3>
-                        <span className="tabular-price shrink-0 font-mono text-sm font-semibold text-ink">
-                          {formatCurrency(
-                            Number(product.base_price),
-                            restaurant.currency_code
-                          )}
-                        </span>
+                  <div className="mt-6 flex items-center justify-between border-t border-hairline pt-4">
+                    <span className="tabular-price font-mono text-lg font-semibold text-ember">
+                      {formatCurrency(
+                        Number(featuredSlice[0].base_price),
+                        restaurant.currency_code
+                      )}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink group-hover:text-ember">
+                      <span>Ver en la carta</span>
+                      <ArrowRight className="size-4" />
+                    </span>
+                  </div>
+                </div>
+              </Link>
+            ) : (
+              <div
+                className={`grid gap-6 ${getAdaptiveThreeColumnGrid(
+                  featuredSlice.length
+                )}`}
+              >
+                {featuredSlice.map((product, idx) => (
+                  <Link
+                    key={product.id}
+                    href={`/${restaurant.slug}/menu`}
+                    className="group flex flex-col overflow-hidden rounded-3xl border border-hairline bg-canvas-elevated transition hover:-translate-y-1 hover:border-ember/50 hover:shadow-lg"
+                  >
+                    {product.image_url && (
+                      <div className="relative aspect-[4/3] w-full overflow-hidden bg-canvas-muted">
+                        <Image
+                          src={product.image_url}
+                          alt={product.image_alt ?? product.name}
+                          fill
+                          priority={idx < 2}
+                          sizes={
+                            featuredSlice.length === 2
+                              ? "(max-width: 768px) 100vw, 50vw"
+                              : "(max-width: 768px) 100vw, 33vw"
+                          }
+                          className="object-cover transition duration-500 group-hover:scale-105"
+                        />
                       </div>
-                      {product.short_description && (
-                        <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-                          {product.short_description}
+                    )}
+                    <div className="flex flex-1 flex-col justify-between p-6">
+                      <div>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <h3 className="font-display text-2xl font-semibold text-ink transition group-hover:text-ember">
+                            {product.name}
+                          </h3>
+                          <span className="tabular-price shrink-0 font-mono text-sm font-semibold text-ember">
+                            {formatCurrency(
+                              Number(product.base_price),
+                              restaurant.currency_code
+                            )}
+                          </span>
+                        </div>
+                        {product.short_description && (
+                          <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+                            {product.short_description}
+                          </p>
+                        )}
+                      </div>
+                      {product.portion_label && (
+                        <p className="mt-4 border-t border-hairline pt-3 text-xs font-medium text-ink-muted">
+                          {product.portion_label}
                         </p>
                       )}
                     </div>
-                    {product.portion_label && (
-                      <p className="mt-4 border-t border-hairline pt-3 text-xs font-medium text-ink-muted">
-                        {product.portion_label}
-                      </p>
-                    )}
-                  </div>
-                </Link>
-              ))}
-            </div>
+                  </Link>
+                ))}
+              </div>
+            )}
           </section>
         )}
 
-        {/* Private Events & Celebrations Teaser */}
+        {/* Private Events & Celebrations Teaser (Adaptive 1 / 2 / 3 Grid + Tenant Atmosphere) */}
         {enabledModules.events && eventSpaces.length > 0 && (
-          <section className="border-y border-obsidian-border bg-obsidian py-16 text-ivory">
+          <section
+            className={
+              isSunlitHero
+                ? "border-y border-hairline bg-surface-accent/50 py-16 text-ink"
+                : "border-y border-obsidian-border bg-obsidian py-16 text-ivory"
+            }
+          >
             <div className="mx-auto max-w-6xl px-4 sm:px-6">
               <div className="mb-10 flex flex-col justify-between gap-4 md:flex-row md:items-end">
                 <div>
-                  <span className="text-xs font-semibold uppercase tracking-[0.18em] text-gold">
+                  <span
+                    className={`text-xs font-semibold uppercase tracking-[0.16em] ${
+                      isSunlitHero ? "text-ember" : "text-gold"
+                    }`}
+                  >
                     Eventos Empresariales & Celebraciones Privadas
                   </span>
-                  <h2 className="mt-1 font-display text-3xl font-semibold text-ivory sm:text-4xl">
+                  <h2
+                    className={`mt-1 font-display text-3xl font-semibold sm:text-4xl ${
+                      isSunlitHero ? "text-ink" : "text-ivory"
+                    }`}
+                  >
                     Salones Diseñados para Grandes Ocasiones
                   </h2>
                 </div>
                 <Link
                   href={`/${restaurant.slug}/eventos`}
-                  className="inline-flex min-h-11 items-center gap-2 rounded-full bg-ember px-6 py-2.5 text-sm font-semibold text-ivory transition hover:bg-ember-hover"
+                  className="inline-flex min-h-11 items-center gap-2 rounded-full bg-ember px-6 py-2.5 text-sm font-semibold text-ivory shadow-xs transition hover:bg-ember-hover"
                 >
                   <span>Ver paquetes y cotizar fecha</span>
                   <ArrowRight className="size-4" />
                 </Link>
               </div>
 
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+              <div
+                className={`grid gap-6 ${getAdaptiveThreeColumnGrid(
+                  eventSpaces.length
+                )}`}
+              >
                 {eventSpaces.map((space) => (
-                  <div
+                  <Link
                     key={space.id}
-                    className="group flex flex-col justify-between overflow-hidden rounded-3xl border border-obsidian-border bg-obsidian-card"
+                    href={`/${restaurant.slug}/eventos?salon=${encodeURIComponent(
+                      space.slug
+                    )}`}
+                    className={
+                      isSunlitHero
+                        ? "group flex flex-col justify-between overflow-hidden rounded-3xl border border-hairline bg-canvas-elevated shadow-xs transition hover:-translate-y-1 hover:border-ember/50 hover:shadow-lg"
+                        : "group flex flex-col justify-between overflow-hidden rounded-3xl border border-obsidian-border bg-obsidian-card transition hover:-translate-y-1 hover:border-gold/50"
+                    }
                   >
                     <div>
                       {space.cover_image_url && (
-                        <div className="relative aspect-[16/10] w-full overflow-hidden bg-obsidian">
+                        <div className="relative aspect-[16/10] w-full overflow-hidden bg-canvas-muted">
                           <Image
                             src={space.cover_image_url}
                             alt={space.name}
                             fill
-                            sizes="(max-width: 768px) 100vw, 33vw"
+                            sizes={
+                              eventSpaces.length === 2
+                                ? "(max-width: 768px) 100vw, 50vw"
+                                : "(max-width: 768px) 100vw, 33vw"
+                            }
                             className="object-cover transition duration-500 group-hover:scale-105"
                           />
-                          <div className="absolute inset-0 bg-gradient-to-t from-obsidian/80 via-transparent to-transparent" />
-                          <span className="absolute bottom-3 left-3.5 inline-flex items-center gap-1.5 rounded-full bg-obsidian/90 px-3 py-1 font-mono text-xs text-gold border border-obsidian-border">
-                            <Users className="size-3.5 text-ember-glow" />
-                            {space.min_guests} – {space.capacity_seated} personas
+                          <div className="absolute inset-0 bg-gradient-to-t from-obsidian/75 via-transparent to-transparent" />
+                          <span className="absolute bottom-3 left-3.5 inline-flex items-center gap-1.5 rounded-full border border-obsidian-border bg-obsidian/90 px-3 py-1 font-mono text-xs text-ivory">
+                            <Users className="size-3.5 text-gold" />
+                            <span>
+                              {space.min_guests} – {space.capacity_seated} personas
+                            </span>
                           </span>
                         </div>
                       )}
                       <div className="p-6 pb-0">
                         {!space.cover_image_url && (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-obsidian px-3 py-1 font-mono text-xs text-gold border border-obsidian-border">
-                            <Users className="size-3.5 text-ember-glow" />
-                            {space.min_guests} – {space.capacity_seated} personas
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-mono text-xs ${
+                              isSunlitHero
+                                ? "border-hairline bg-surface-accent text-ember"
+                                : "border-obsidian-border bg-obsidian text-gold"
+                            }`}
+                          >
+                            <Users className="size-3.5" />
+                            <span>
+                              {space.min_guests} – {space.capacity_seated} personas
+                            </span>
                           </span>
                         )}
-                        <h3 className="font-display text-2xl font-semibold text-ivory">
+                        <h3
+                          className={`font-display text-2xl font-semibold ${
+                            isSunlitHero
+                              ? "text-ink group-hover:text-ember"
+                              : "text-ivory group-hover:text-gold"
+                          }`}
+                        >
                           {space.name}
                         </h3>
-                        <p className="mt-2 text-sm leading-relaxed text-ivory-muted">
+                        <p
+                          className={`mt-2 text-sm leading-relaxed ${
+                            isSunlitHero ? "text-ink-muted" : "text-ivory-muted"
+                          }`}
+                        >
                           {space.description}
                         </p>
                       </div>
                     </div>
-                    <div className="m-6 mt-5 border-t border-obsidian-border pt-4">
-                      <Link
-                        href={`/${restaurant.slug}/eventos`}
-                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-ember-glow hover:underline"
+                    <div
+                      className={`m-6 mt-5 border-t pt-4 ${
+                        isSunlitHero
+                          ? "border-hairline"
+                          : "border-obsidian-border"
+                      }`}
+                    >
+                      <span
+                        className={`inline-flex items-center gap-1.5 text-xs font-semibold group-hover:underline ${
+                          isSunlitHero ? "text-ember" : "text-ember-glow"
+                        }`}
                       >
-                        <span>Consultar paquetes y condiciones</span>
+                        <span>Explorar galería, paquetes y disponibilidad</span>
                         <ArrowRight className="size-3.5" />
-                      </Link>
+                      </span>
                     </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             </div>
           </section>
         )}
 
-        {/* Multi-Location / Establishment Dossier with Galleries & Differentials */}
+        {/* Multi-Location or Single-Establishment Architectural Showcase */}
         <LocationsShowcase
           restaurantName={restaurant.name}
           restaurantSlug={restaurant.slug}
@@ -337,24 +554,14 @@ export default async function RestaurantCommercialPage({
         />
       </main>
 
-      <footer className="border-t border-hairline bg-canvas-elevated py-8 text-xs text-ink-muted">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-4 sm:flex-row sm:px-6">
-          <div>
-            <p className="font-semibold text-ink">
-              {restaurant.name} · {restaurant.tagline}
-            </p>
-            <p className="mt-0.5">
-              {contact.instagramHandle} · {contact.eventsEmail}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 text-ink-muted">
-            <ShieldCheck className="size-4 text-sage" />
-            <span>
-              Plataforma Multi-Tenant con Aislamiento RLS · Cumplimiento Ley 1581
-            </span>
-          </div>
-        </div>
-      </footer>
+      <RestaurantFooter
+        slug={restaurant.slug}
+        name={restaurant.name}
+        tagline={restaurant.tagline}
+        contact={contact}
+        locations={locations}
+        enabledModules={enabledModules}
+      />
     </div>
   );
 }
