@@ -39,6 +39,7 @@ interface InteractiveMenuBrowserProps {
   serviceNotes?: string | null;
   categories: CategoryWithProducts[];
   locations?: LocationRow[];
+  initialLocationSlug?: string;
 }
 
 interface TableSelectionItem {
@@ -61,9 +62,19 @@ export function InteractiveMenuBrowser({
   serviceNotes,
   categories,
   locations = [],
+  initialLocationSlug,
 }: InteractiveMenuBrowserProps) {
   const [activeCategorySlug, setActiveCategorySlug] = useState<string>("all");
-  const [selectedLocationId, setSelectedLocationId] = useState<string>("all");
+  const [selectedLocationId, setSelectedLocationId] = useState<string>(() => {
+    if (initialLocationSlug && locations.length > 0) {
+      const normalized = initialLocationSlug.trim().toLowerCase();
+      const matched = locations.find(
+        (l) => l.slug.toLowerCase() === normalized || l.id === normalized
+      );
+      if (matched) return matched.id;
+    }
+    return "all";
+  });
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [onlyHighlights, setOnlyHighlights] = useState<boolean>(false);
   const [onlyAvailable, setOnlyAvailable] = useState<boolean>(false);
@@ -870,7 +881,7 @@ export function InteractiveMenuBrowser({
 
             <div className="flex-1 overflow-y-auto">
               {selectedProduct.image_url && (
-                <div className="relative aspect-[16/10] w-full bg-obsidian">
+                <div className="relative h-48 sm:h-52 w-full bg-obsidian">
                   <Image
                     src={selectedProduct.image_url}
                     alt={selectedProduct.image_alt ?? selectedProduct.name}
@@ -881,7 +892,7 @@ export function InteractiveMenuBrowser({
                 </div>
               )}
 
-              <div className="p-6 sm:p-7">
+              <div className="p-5 sm:p-6">
                 <div className="flex flex-wrap items-center gap-2 pr-10">
                   {selectedProduct.availability_status === "sold_out" && (
                     <span className="rounded-full bg-amber-warn/15 px-3 py-1 text-xs font-semibold text-amber-warn">
@@ -911,31 +922,41 @@ export function InteractiveMenuBrowser({
 
                 <h2
                   id="product-modal-title"
-                  className="mt-2 font-display text-3xl font-semibold text-ink"
+                  className="mt-2 font-display text-2xl sm:text-3xl font-semibold text-ink"
                 >
                   {selectedProduct.name}
                 </h2>
 
-                {selectedProduct.portion_label && (
-                  <p className="mt-1 text-xs font-semibold uppercase tracking-wider text-ember">
-                    {selectedProduct.portion_label}
-                  </p>
-                )}
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                  {selectedProduct.portion_label && (
+                    <p className="text-xs font-semibold uppercase tracking-wider text-ember">
+                      {selectedProduct.portion_label}
+                    </p>
+                  )}
+                  {selectedProduct.optionGroups.length > 0 && (
+                    <a
+                      href="#product-modal-options"
+                      className="inline-flex items-center gap-1 rounded-full bg-ember/15 px-3 py-0.5 text-[11px] font-semibold text-ember transition hover:bg-ember hover:text-ivory"
+                    >
+                      <span>Personalizar término y guarnición ↓</span>
+                    </a>
+                  )}
+                </div>
 
-                <p className="mt-3 text-sm leading-relaxed text-ink-muted">
+                <p className="mt-2.5 text-sm leading-relaxed text-ink-muted">
                   {selectedProduct.long_description ??
                     selectedProduct.short_description}
                 </p>
 
                 {/* Plus #2: Sommelier Pairing Recommendation */}
                 {selectedProduct.pairing_note && (
-                  <div className="mt-5 flex items-start gap-3 rounded-2xl border border-gold/30 bg-obsidian p-4 text-ivory">
-                    <Wine className="mt-0.5 size-5 shrink-0 text-gold" />
+                  <div className="mt-4 flex items-start gap-3 rounded-2xl border border-gold/30 bg-obsidian p-3.5 text-ivory">
+                    <Wine className="mt-0.5 size-4 shrink-0 text-gold" />
                     <div>
                       <span className="block text-[11px] font-semibold uppercase tracking-wider text-gold">
                         Sugerencia de Maridaje · Sommelier
                       </span>
-                      <p className="mt-1 text-xs leading-relaxed text-ivory-muted">
+                      <p className="mt-0.5 text-xs leading-relaxed text-ivory-muted">
                         {selectedProduct.pairing_note}
                       </p>
                     </div>
@@ -944,7 +965,10 @@ export function InteractiveMenuBrowser({
 
                 {/* Simple Variant / Option Groups (D1 Decision) */}
                 {selectedProduct.optionGroups.length > 0 && (
-                  <div className="mt-6 flex flex-col gap-5 border-t border-hairline pt-5">
+                  <div
+                    id="product-modal-options"
+                    className="mt-5 flex flex-col gap-5 border-t border-hairline pt-4"
+                  >
                     {selectedProduct.optionGroups.map((group) => (
                       <div key={group.id}>
                         <div className="flex items-center justify-between gap-2">

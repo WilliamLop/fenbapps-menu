@@ -672,10 +672,10 @@ export function EventInquiryComposer({
                         className="object-cover transition duration-500 group-hover:scale-105"
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-obsidian/85 via-obsidian/20 to-transparent" />
-                      <div className="absolute left-4 right-4 top-3.5 flex items-center justify-between gap-2">
+                      <div className="absolute left-3.5 right-3.5 top-3 flex items-center justify-between gap-1.5">
                         {pkg.badge_label && (
                           <span
-                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                               pkg.is_featured
                                 ? "bg-ember text-ivory"
                                 : "bg-obsidian/90 text-gold border border-gold/30"
@@ -684,8 +684,8 @@ export function EventInquiryComposer({
                             {pkg.badge_label}
                           </span>
                         )}
-                        <span className="tabular-price rounded-full bg-obsidian/90 px-2.5 py-1 font-mono text-xs text-ivory">
-                          {pkg.min_guests} a {pkg.max_guests ?? 95} inv.
+                        <span className="tabular-price shrink-0 whitespace-nowrap rounded-full bg-obsidian/90 px-2.5 py-1 font-mono text-[11px] text-ivory">
+                          {pkg.min_guests}–{pkg.max_guests ?? 95} inv.
                         </span>
                       </div>
                       {pkg.duration_hours && (

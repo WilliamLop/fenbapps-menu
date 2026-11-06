@@ -1,4 +1,4 @@
-import { unstable_cache } from "next/cache";
+import { cache } from "react";
 import { createSupabasePublicServerClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database.types";
 
@@ -260,27 +260,13 @@ async function fetchRestaurantAggregateUncached(
   };
 }
 
-export async function getRestaurantBySlug(
-  slug: string
-): Promise<RestaurantAggregateData | null> {
-  const sanitizedSlug = slug.trim().toLowerCase();
-  if (!/^[a-z0-9-]+$/.test(sanitizedSlug)) {
-    return null;
-  }
-
-  const cachedFn = unstable_cache(
-    async () => fetchRestaurantAggregateUncached(sanitizedSlug),
-    [`tenant-aggregate-v4-${sanitizedSlug}`],
-    {
-      tags: [
-        `tenant:${sanitizedSlug}`,
-        `tenant:${sanitizedSlug}:menu`,
-        `tenant:${sanitizedSlug}:events`,
-        `tenant:${sanitizedSlug}:site`,
-      ],
-      revalidate: 60,
+export const getRestaurantBySlug = cache(
+  async (slug: string): Promise<RestaurantAggregateData | null> => {
+    const sanitizedSlug = slug.trim().toLowerCase();
+    if (!/^[a-z0-9-]+$/.test(sanitizedSlug)) {
+      return null;
     }
-  );
 
-  return cachedFn();
-}
+    return fetchRestaurantAggregateUncached(sanitizedSlug);
+  }
+);

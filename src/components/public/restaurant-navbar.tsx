@@ -30,18 +30,47 @@ export function RestaurantNavbar({
       {isDemo && (
         <div className="bg-obsidian text-ivory border-b border-obsidian-border px-4 py-2 text-xs">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-ember/25 px-2.5 py-0.5 font-medium text-ember-glow border border-ember/40">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="hidden lg:inline-flex items-center gap-1.5 rounded-full bg-ember/25 px-2.5 py-0.5 font-medium text-ember-glow border border-ember/40">
                 <Sparkles className="size-3 shrink-0" />
-                <span>Demo Comercial Interactiva</span>
+                <span>Escenario Demo:</span>
               </span>
-              <span className="hidden text-ivory-muted md:inline">
-                Marca gastronómica ficticia para demostración de arquitectura Multi-Tenant.
-              </span>
+              <Link
+                href={
+                  activeTab === "menu"
+                    ? "/casa-brasa/menu"
+                    : activeTab === "events"
+                    ? "/casa-brasa/eventos"
+                    : "/casa-brasa"
+                }
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition ${
+                  slug === "casa-brasa"
+                    ? "bg-ember text-ivory"
+                    : "border border-obsidian-border bg-obsidian-card text-ivory-muted hover:text-ivory"
+                }`}
+              >
+                <span>🔥 Casa Brasa (2 Sedes)</span>
+              </Link>
+              <Link
+                href={
+                  activeTab === "menu"
+                    ? "/botanica-brunch/menu"
+                    : activeTab === "events"
+                    ? "/botanica-brunch/eventos"
+                    : "/botanica-brunch"
+                }
+                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition ${
+                  slug === "botanica-brunch"
+                    ? "bg-ember text-ivory"
+                    : "border border-obsidian-border bg-obsidian-card text-ivory-muted hover:text-ivory"
+                }`}
+              >
+                <span>🌿 Botánica (1 Sede)</span>
+              </Link>
             </div>
             <Link
               href={`/dashboard/${slug}`}
-              className="inline-flex items-center gap-1.5 rounded-md bg-ivory/10 px-2.5 py-1 font-medium text-ivory transition hover:bg-ivory/20"
+              className="inline-flex items-center gap-1.5 rounded-md bg-ivory/10 px-2.5 py-1 text-[11px] sm:text-xs font-medium text-ivory transition hover:bg-ivory/20"
             >
               <LayoutDashboard className="size-3.5 shrink-0 text-gold" />
               <span>Consola Operativa</span>

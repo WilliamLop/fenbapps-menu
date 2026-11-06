@@ -100,21 +100,49 @@ export default async function RestaurantCommercialPage({
               <div className="mt-10 grid grid-cols-3 gap-4 border-t border-obsidian-border pt-6 text-xs text-ivory-muted">
                 <div>
                   <span className="tabular-price block font-mono text-lg font-semibold text-ivory">
-                    28 – 45 Días
+                    {restaurant.slug === "casa-brasa"
+                      ? "28 – 45 Días"
+                      : `${data.categories.reduce(
+                          (acc, c) => acc + c.products.length,
+                          0
+                        )} Platos`}
                   </span>
-                  <span>Maduración Dry-Aged en casa</span>
+                  <span>
+                    {restaurant.slug === "casa-brasa"
+                      ? "Maduración Dry-Aged en casa"
+                      : restaurant.cuisine_type ?? "Carta de Autor"}
+                  </span>
                 </div>
                 <div>
                   <span className="tabular-price block font-mono text-lg font-semibold text-ivory">
-                    {locations.length} Sedes
+                    {locations.length === 1
+                      ? "1 Sola Sede"
+                      : `${locations.length} Sedes`}
                   </span>
-                  <span>Parque de la 93 & Zona G</span>
+                  <span>
+                    {locations
+                      .map(
+                        (l) =>
+                          l.neighborhood?.split("·")[0]?.trim() || l.name
+                      )
+                      .join(" & ")}
+                  </span>
                 </div>
                 <div>
                   <span className="tabular-price block font-mono text-lg font-semibold text-ivory">
-                    10 – 75 Inv.
+                    {eventSpaces.length > 0
+                      ? `${Math.min(
+                          ...eventSpaces.map((s) => s.min_guests)
+                        )} – ${Math.max(
+                          ...eventSpaces.map((s) => s.capacity_seated)
+                        )} Inv.`
+                      : "Eventos"}
                   </span>
-                  <span>Salones y Cava Privada</span>
+                  <span>
+                    {eventSpaces.length === 1
+                      ? "1 Salón Privado"
+                      : `${eventSpaces.length} Salones Privados`}
+                  </span>
                 </div>
               </div>
             </div>
@@ -130,19 +158,24 @@ export default async function RestaurantCommercialPage({
                   className="object-cover"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-obsidian/85 via-transparent to-transparent" />
-                <div className="absolute bottom-5 left-5 right-5 rounded-2xl border border-obsidian-border/80 bg-obsidian/90 p-4 backdrop-blur-md">
-                  <span className="text-[11px] font-semibold uppercase tracking-widest text-ember-glow">
-                    Corte Insignia en Carta
-                  </span>
-                  <div className="mt-1 flex items-baseline justify-between gap-2">
-                    <p className="font-display text-xl font-semibold text-ivory">
-                      Ribeye Ojo de Bife · 35 Días
-                    </p>
-                    <span className="tabular-price font-mono text-sm font-semibold text-gold">
-                      $ 128.000
+                {featuredProducts[0] && (
+                  <div className="absolute bottom-5 left-5 right-5 rounded-2xl border border-obsidian-border/80 bg-obsidian/90 p-4 backdrop-blur-md">
+                    <span className="text-[11px] font-semibold uppercase tracking-widest text-ember-glow">
+                      Plato Insignia en Carta
                     </span>
+                    <div className="mt-1 flex items-baseline justify-between gap-2">
+                      <p className="font-display text-xl font-semibold text-ivory line-clamp-1">
+                        {featuredProducts[0].name}
+                      </p>
+                      <span className="tabular-price shrink-0 font-mono text-sm font-semibold text-gold">
+                        {formatCurrency(
+                          Number(featuredProducts[0].base_price),
+                          restaurant.currency_code
+                        )}
+                      </span>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
@@ -182,7 +215,7 @@ export default async function RestaurantCommercialPage({
                         src={product.image_url}
                         alt={product.image_alt ?? product.name}
                         fill
-                        priority={idx === 0}
+                        priority={idx < 2}
                         sizes="(max-width: 768px) 100vw, 33vw"
                         className="object-cover transition duration-500 group-hover:scale-105"
                       />

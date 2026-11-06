@@ -6,6 +6,7 @@ import { InteractiveMenuBrowser } from "@/components/public/interactive-menu-bro
 
 interface MenuPageProps {
   params: Promise<{ restaurantSlug: string }>;
+  searchParams: Promise<{ sede?: string }>;
 }
 
 export async function generateMetadata({
@@ -24,8 +25,14 @@ export async function generateMetadata({
   };
 }
 
-export default async function RestaurantMenuPage({ params }: MenuPageProps) {
-  const { restaurantSlug } = await params;
+export default async function RestaurantMenuPage({
+  params,
+  searchParams,
+}: MenuPageProps) {
+  const [{ restaurantSlug }, resolvedSearch] = await Promise.all([
+    params,
+    searchParams,
+  ]);
   const data = await getRestaurantBySlug(restaurantSlug);
 
   if (!data || !data.enabledModules.menu) {
@@ -56,6 +63,7 @@ export default async function RestaurantMenuPage({ params }: MenuPageProps) {
           serviceNotes={primaryMenu?.service_notes}
           categories={data.categories}
           locations={data.locations}
+          initialLocationSlug={resolvedSearch.sede}
         />
       </main>
     </div>

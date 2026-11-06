@@ -825,6 +825,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_operational_console_snapshot: {
+        Args: { p_restaurant_slug: string }
+        Returns: Json
+      }
       submit_public_event_inquiry: {
         Args: {
           p_company_name?: string
@@ -842,6 +846,24 @@ export type Database = {
           p_source_ip_hash?: string
           p_special_requests?: string
           p_tentative_date: string
+        }
+        Returns: Json
+      }
+      update_event_inquiry_operational_state: {
+        Args: {
+          p_inquiry_id: string
+          p_internal_notes: string
+          p_restaurant_slug: string
+          p_status: string
+        }
+        Returns: Json
+      }
+      update_product_operational_state: {
+        Args: {
+          p_availability_status: string
+          p_base_price: number
+          p_product_id: string
+          p_restaurant_slug: string
         }
         Returns: Json
       }

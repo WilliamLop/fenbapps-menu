@@ -64,7 +64,7 @@ export function LocationsShowcase({
   const isSingleLocation = locations.length === 1;
 
   return (
-    <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+    <section id="sedes" className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
       <div className="mb-10 flex flex-col justify-between gap-4 border-b border-hairline pb-5 md:flex-row md:items-end">
         <div>
           <span className="text-xs font-semibold uppercase tracking-[0.18em] text-ember">
@@ -343,6 +343,7 @@ export function LocationsShowcase({
               <button
                 type="button"
                 onClick={() => setSelectedLocModal(null)}
+                aria-label="Cerrar galería de la sede"
                 className="flex size-10 items-center justify-center rounded-full bg-obsidian text-ivory hover:bg-ember"
               >
                 <X className="size-5" />

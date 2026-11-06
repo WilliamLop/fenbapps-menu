@@ -515,8 +515,48 @@ async function runAudit() {
       fullPage: true,
     });
 
+    // Click Tab 2: Mini-CRM de Solicitudes de Eventos
+    const crmTabBtn = page
+      .locator('[role="tab"]', { hasText: "Mini-CRM de Solicitudes" })
+      .first();
+    if ((await crmTabBtn.count()) > 0) {
+      await crmTabBtn.click();
+      await page.waitForTimeout(350);
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `11b-dashboard-${vp.name}-crm-eventos.png`),
+        fullPage: false,
+      });
+    }
+
+    // Click Tab 3: Códigos QR Inteligentes por Sede
+    const qrTabBtn = page
+      .locator('[role="tab"]', { hasText: "Códigos QR Inteligentes" })
+      .first();
+    if ((await qrTabBtn.count()) > 0) {
+      await qrTabBtn.click();
+      await page.waitForTimeout(350);
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `11c-dashboard-${vp.name}-qr-generator.png`),
+        fullPage: false,
+      });
+    }
+
     report.routeAudits.push(
       await collectPageMetrics(page, "/dashboard/casa-brasa", vp.name)
+    );
+
+    // 5. Audit "/botanica-brunch" (Single-Location Demo Scenario)
+    console.log(`[${vp.name}] Auditing /botanica-brunch (Single-Location Scenario)...`);
+    await page.goto(`${BASE_URL}/botanica-brunch`, {
+      waitUntil: "networkidle",
+    });
+    await page.waitForTimeout(450);
+    await page.screenshot({
+      path: path.join(SCREENSHOT_DIR, `12-botanica-${vp.name}-single-location.png`),
+      fullPage: true,
+    });
+    report.routeAudits.push(
+      await collectPageMetrics(page, "/botanica-brunch", vp.name)
     );
 
     report.interactiveTests[vp.name] = {
