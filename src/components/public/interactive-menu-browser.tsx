@@ -42,6 +42,8 @@ export function InteractiveMenuBrowser({
   const [activeCategorySlug, setActiveCategorySlug] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [onlyHighlights, setOnlyHighlights] = useState<boolean>(false);
+  const [onlyAvailable, setOnlyAvailable] = useState<boolean>(false);
+  const [dietaryTag, setDietaryTag] = useState<string | null>(null);
   const [selectedProduct, setSelectedProduct] =
     useState<ProductWithDetails | null>(null);
   const [selectedOptions, setSelectedOptions] = useState<
@@ -58,6 +60,17 @@ export function InteractiveMenuBrowser({
       .map((cat) => {
         const matchingProducts = cat.products.filter((prod) => {
           if (onlyHighlights && !prod.is_featured && !prod.is_chef_choice) {
+            return false;
+          }
+          if (onlyAvailable && prod.availability_status !== "available") {
+            return false;
+          }
+          if (
+            dietaryTag &&
+            !prod.badges.some(
+              (b) => b.toLowerCase() === dietaryTag.toLowerCase()
+            )
+          ) {
             return false;
           }
           if (!q) {
@@ -78,7 +91,14 @@ export function InteractiveMenuBrowser({
         };
       })
       .filter((cat) => cat.products.length > 0);
-  }, [categories, activeCategorySlug, searchQuery, onlyHighlights]);
+  }, [
+    categories,
+    activeCategorySlug,
+    searchQuery,
+    onlyHighlights,
+    onlyAvailable,
+    dietaryTag,
+  ]);
 
   function openProductDetail(product: ProductWithDetails) {
     const initialSelections: Record<string, string> = {};
@@ -130,41 +150,74 @@ export function InteractiveMenuBrowser({
         </div>
 
         {/* Search & Quick Filter Controls */}
-        <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
-          <div className="relative min-w-[260px]">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar corte, ingrediente o vino..."
-              aria-label="Buscar en la carta"
-              className="h-11 w-full rounded-full border border-hairline bg-canvas-elevated pl-10 pr-9 text-sm text-ink placeholder:text-ink-muted/70 focus:border-ember focus:outline-none"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery("")}
-                aria-label="Limpiar búsqueda"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-ink-muted hover:text-ink"
-              >
-                <X className="size-4" />
-              </button>
-            )}
+        <div className="flex flex-col gap-2.5 sm:items-end">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative min-w-[260px] sm:min-w-[280px]">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-ink-muted" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Buscar corte, ingrediente o vino..."
+                aria-label="Buscar en la carta"
+                className="h-11 w-full rounded-full border border-hairline bg-canvas-elevated pl-10 pr-9 text-sm text-ink placeholder:text-ink-muted/70 focus:border-ember focus:outline-none"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  aria-label="Limpiar búsqueda"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-ink-muted hover:text-ink"
+                >
+                  <X className="size-4" />
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setOnlyHighlights((prev) => !prev)}
+              className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
+                onlyHighlights
+                  ? "border-ember bg-ember text-ivory"
+                  : "border-hairline bg-canvas-elevated text-ink hover:border-ink/40"
+              }`}
+            >
+              <Sparkles className="size-3.5 shrink-0" />
+              <span>Insignias del Chef</span>
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setOnlyHighlights((prev) => !prev)}
-            className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-wider transition ${
-              onlyHighlights
-                ? "border-ember bg-ember text-ivory"
-                : "border-hairline bg-canvas-elevated text-ink hover:border-ink/40"
-            }`}
-          >
-            <Sparkles className="size-3.5" />
-            <span>Insignias del Chef</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setOnlyAvailable((prev) => !prev)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                onlyAvailable
+                  ? "border-obsidian bg-obsidian text-ivory"
+                  : "border-hairline bg-canvas-elevated text-ink-muted hover:text-ink"
+              }`}
+            >
+              Solo disponibles
+            </button>
+            {["Sin Gluten", "Vegetariano"].map((tag) => {
+              const active = dietaryTag === tag;
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => setDietaryTag(active ? null : tag)}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                    active
+                      ? "border-ember bg-ember/15 text-ember font-semibold"
+                      : "border-hairline bg-canvas-elevated text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  {tag}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -172,7 +225,7 @@ export function InteractiveMenuBrowser({
       <div
         role="tablist"
         aria-label="Categorías de la carta"
-        className="sticky top-[69px] z-30 -mx-4 mb-8 flex gap-2 overflow-x-auto border-b border-hairline bg-canvas/95 px-4 py-3 backdrop-blur-md sm:mx-0 sm:rounded-2xl sm:border sm:px-3"
+        className="sticky top-[105px] sm:top-[69px] z-30 -mx-4 mb-8 flex gap-2 overflow-x-auto border-b border-hairline bg-canvas/95 px-4 py-2.5 backdrop-blur-md sm:mx-0 sm:rounded-2xl sm:border sm:px-3 sm:py-3"
       >
         <button
           type="button"
@@ -220,6 +273,8 @@ export function InteractiveMenuBrowser({
             onClick={() => {
               setSearchQuery("");
               setOnlyHighlights(false);
+              setOnlyAvailable(false);
+              setDietaryTag(null);
               setActiveCategorySlug("all");
             }}
             className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-full bg-obsidian px-5 py-2.5 text-sm font-medium text-ivory transition hover:bg-ember"
@@ -231,11 +286,11 @@ export function InteractiveMenuBrowser({
 
       {/* Category Sections */}
       <div className="flex flex-col gap-14">
-        {filteredCategories.map((category) => (
+        {filteredCategories.map((category, categoryIndex) => (
           <section
             key={category.id}
             id={`categoria-${category.slug}`}
-            className="scroll-mt-36"
+            className="scroll-mt-44 sm:scroll-mt-36"
           >
             <div className="mb-6 border-b border-hairline pb-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -321,7 +376,7 @@ export function InteractiveMenuBrowser({
             ) : (
               /* High-Impact Editorial Photo Grid */
               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                {category.products.map((product) => {
+                {category.products.map((product, productIndex) => {
                   const isSoldOut = product.availability_status === "sold_out";
                   return (
                     <article
@@ -347,6 +402,7 @@ export function InteractiveMenuBrowser({
                             src={product.image_url}
                             alt={product.image_alt ?? product.name}
                             fill
+                            priority={categoryIndex === 0 && productIndex < 2}
                             sizes="(max-width: 768px) 100vw, 50vw"
                             className={`object-cover transition duration-500 ${
                               isSoldOut
@@ -455,163 +511,156 @@ export function InteractiveMenuBrowser({
           onClick={() => setSelectedProduct(null)}
         >
           <div
-            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-t-3xl bg-canvas-elevated shadow-2xl sm:rounded-3xl border border-hairline"
+            className="relative flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-t-3xl border border-hairline bg-canvas-elevated shadow-2xl sm:rounded-3xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {selectedProduct.image_url && (
-              <div className="relative aspect-[16/10] w-full bg-obsidian">
-                <Image
-                  src={selectedProduct.image_url}
-                  alt={selectedProduct.image_alt ?? selectedProduct.name}
-                  fill
-                  sizes="(max-width: 640px) 100vw, 600px"
-                  className="object-cover"
-                />
-                <button
-                  type="button"
-                  onClick={() => setSelectedProduct(null)}
-                  aria-label="Cerrar detalle del plato"
-                  className="absolute right-4 top-4 flex size-10 items-center justify-center rounded-full bg-obsidian/80 text-ivory transition hover:bg-obsidian"
-                >
-                  <X className="size-5" />
-                </button>
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={() => setSelectedProduct(null)}
+              aria-label="Cerrar detalle del plato"
+              className="absolute right-4 top-4 z-20 flex size-10 items-center justify-center rounded-full bg-obsidian/85 text-ivory shadow-md transition hover:bg-obsidian"
+            >
+              <X className="size-5" />
+            </button>
 
-            <div className="p-6 sm:p-7">
-              {!selectedProduct.image_url && (
-                <div className="mb-3 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedProduct(null)}
-                    aria-label="Cerrar detalle"
-                    className="flex size-10 items-center justify-center rounded-full bg-canvas-muted text-ink"
-                  >
-                    <X className="size-5" />
-                  </button>
+            <div className="flex-1 overflow-y-auto">
+              {selectedProduct.image_url && (
+                <div className="relative aspect-[16/10] w-full bg-obsidian">
+                  <Image
+                    src={selectedProduct.image_url}
+                    alt={selectedProduct.image_alt ?? selectedProduct.name}
+                    fill
+                    sizes="(max-width: 640px) 100vw, 600px"
+                    className="object-cover"
+                  />
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center gap-2">
-                {selectedProduct.availability_status === "sold_out" && (
-                  <span className="rounded-full bg-amber-warn/15 px-3 py-1 text-xs font-semibold text-amber-warn">
-                    Agotado por hoy
-                  </span>
-                )}
-                {selectedProduct.badges.map((badge) => (
-                  <span
-                    key={badge}
-                    className="rounded-full bg-canvas-muted px-2.5 py-1 text-xs font-medium text-ink-muted"
-                  >
-                    {badge}
-                  </span>
-                ))}
-              </div>
-
-              <h2
-                id="product-modal-title"
-                className="mt-2 font-display text-3xl font-semibold text-ink"
-              >
-                {selectedProduct.name}
-              </h2>
-
-              {selectedProduct.portion_label && (
-                <p className="mt-1 text-xs font-semibold uppercase tracking-wider text-ember">
-                  {selectedProduct.portion_label}
-                </p>
-              )}
-
-              <p className="mt-3 text-sm leading-relaxed text-ink-muted">
-                {selectedProduct.long_description ??
-                  selectedProduct.short_description}
-              </p>
-
-              {/* Simple Variant / Option Groups (D1 Decision) */}
-              {selectedProduct.optionGroups.length > 0 && (
-                <div className="mt-6 flex flex-col gap-5 border-t border-hairline pt-5">
-                  {selectedProduct.optionGroups.map((group) => (
-                    <div key={group.id}>
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-sm font-semibold text-ink">
-                          {group.name}
-                        </h3>
-                        {group.is_required && (
-                          <span className="rounded-full bg-obsidian px-2.5 py-0.5 text-[11px] font-medium text-ivory">
-                            Requerido
-                          </span>
-                        )}
-                      </div>
-                      {group.helper_text && (
-                        <p className="mt-0.5 text-xs text-ink-muted">
-                          {group.helper_text}
-                        </p>
-                      )}
-
-                      <div className="mt-2.5 flex flex-col gap-2">
-                        {group.options.map((opt) => {
-                          const isSelected =
-                            selectedOptions[group.id] === opt.id;
-                          const delta = Number(opt.price_delta);
-                          return (
-                            <button
-                              key={opt.id}
-                              type="button"
-                              onClick={() =>
-                                setSelectedOptions((prev) => ({
-                                  ...prev,
-                                  [group.id]: opt.id,
-                                }))
-                              }
-                              className={`flex min-h-11 items-center justify-between rounded-xl border px-3.5 py-2.5 text-left text-sm transition ${
-                                isSelected
-                                  ? "border-ember bg-ember/8 font-medium text-ink"
-                                  : "border-hairline bg-canvas text-ink-muted hover:border-ink/30"
-                              }`}
-                            >
-                              <span className="flex items-center gap-2.5">
-                                <span
-                                  className={`flex size-4 items-center justify-center rounded-full border ${
-                                    isSelected
-                                      ? "border-ember bg-ember text-ivory"
-                                      : "border-ink-muted"
-                                  }`}
-                                >
-                                  {isSelected && <Check className="size-2.5" />}
-                                </span>
-                                <span>{opt.name}</span>
-                              </span>
-                              <span className="tabular-price font-mono text-xs font-semibold text-ink">
-                                {delta > 0
-                                  ? `+ ${formatCurrency(delta, currencyCode)}`
-                                  : "Incluido"}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+              <div className="p-6 sm:p-7">
+                <div className="flex flex-wrap items-center gap-2 pr-10">
+                  {selectedProduct.availability_status === "sold_out" && (
+                    <span className="rounded-full bg-amber-warn/15 px-3 py-1 text-xs font-semibold text-amber-warn">
+                      Agotado por hoy
+                    </span>
+                  )}
+                  {selectedProduct.badges.map((badge) => (
+                    <span
+                      key={badge}
+                      className="rounded-full bg-canvas-muted px-2.5 py-1 text-xs font-medium text-ink-muted"
+                    >
+                      {badge}
+                    </span>
                   ))}
                 </div>
-              )}
 
-              <div className="mt-7 flex items-center justify-between border-t border-hairline pt-4">
-                <div>
-                  <span className="block text-xs text-ink-muted">
-                    Precio en carta {selectedProduct.optionGroups.length > 0 ? "con selección" : ""}
-                  </span>
-                  <span className="tabular-price font-mono text-2xl font-semibold text-ink">
-                    {formatCurrency(computedDetailPrice, currencyCode)}
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setSelectedProduct(null)}
-                  className="inline-flex min-h-11 items-center justify-center rounded-full bg-obsidian px-6 py-2.5 text-sm font-medium text-ivory transition hover:bg-ember"
+                <h2
+                  id="product-modal-title"
+                  className="mt-2 font-display text-3xl font-semibold text-ink"
                 >
-                  Seguir explorando
-                </button>
+                  {selectedProduct.name}
+                </h2>
+
+                {selectedProduct.portion_label && (
+                  <p className="mt-1 text-xs font-semibold uppercase tracking-wider text-ember">
+                    {selectedProduct.portion_label}
+                  </p>
+                )}
+
+                <p className="mt-3 text-sm leading-relaxed text-ink-muted">
+                  {selectedProduct.long_description ??
+                    selectedProduct.short_description}
+                </p>
+
+                {/* Simple Variant / Option Groups (D1 Decision) */}
+                {selectedProduct.optionGroups.length > 0 && (
+                  <div className="mt-6 flex flex-col gap-5 border-t border-hairline pt-5">
+                    {selectedProduct.optionGroups.map((group) => (
+                      <div key={group.id}>
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="text-sm font-semibold text-ink">
+                            {group.name}
+                          </h3>
+                          {group.is_required && (
+                            <span className="shrink-0 rounded-full bg-obsidian px-2.5 py-0.5 text-[11px] font-medium text-ivory">
+                              Requerido
+                            </span>
+                          )}
+                        </div>
+                        {group.helper_text && (
+                          <p className="mt-0.5 text-xs text-ink-muted">
+                            {group.helper_text}
+                          </p>
+                        )}
+
+                        <div className="mt-2.5 flex flex-col gap-2">
+                          {group.options.map((opt) => {
+                            const isSelected =
+                              selectedOptions[group.id] === opt.id;
+                            const delta = Number(opt.price_delta);
+                            return (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() =>
+                                  setSelectedOptions((prev) => ({
+                                    ...prev,
+                                    [group.id]: opt.id,
+                                  }))
+                                }
+                                className={`flex min-h-11 items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left text-sm transition ${
+                                  isSelected
+                                    ? "border-ember bg-ember/8 font-medium text-ink"
+                                    : "border-hairline bg-canvas text-ink-muted hover:border-ink/30"
+                                }`}
+                              >
+                                <span className="flex items-center gap-2.5">
+                                  <span
+                                    className={`flex size-4 shrink-0 items-center justify-center rounded-full border ${
+                                      isSelected
+                                        ? "border-ember bg-ember text-ivory"
+                                        : "border-ink-muted"
+                                    }`}
+                                  >
+                                    {isSelected && <Check className="size-2.5" />}
+                                  </span>
+                                  <span>{opt.name}</span>
+                                </span>
+                                <span className="tabular-price shrink-0 whitespace-nowrap font-mono text-xs font-semibold text-ink">
+                                  {delta > 0
+                                    ? `+ ${formatCurrency(delta, currencyCode)}`
+                                    : "Incluido"}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
+            </div>
+
+            <div className="shrink-0 flex items-center justify-between gap-4 border-t border-hairline bg-canvas-elevated px-6 py-4 sm:px-7">
+              <div>
+                <span className="block text-xs text-ink-muted">
+                  Precio en carta{" "}
+                  {selectedProduct.optionGroups.length > 0
+                    ? "con selección"
+                    : ""}
+                </span>
+                <span className="tabular-price font-mono text-2xl font-semibold text-ink">
+                  {formatCurrency(computedDetailPrice, currencyCode)}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedProduct(null)}
+                className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-full bg-obsidian px-6 py-2.5 text-sm font-medium text-ivory transition hover:bg-ember"
+              >
+                Seguir explorando
+              </button>
             </div>
           </div>
         </div>

@@ -169,7 +169,7 @@ export default async function RestaurantCommercialPage({
             </div>
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-              {featuredProducts.slice(0, 3).map((product) => (
+              {featuredProducts.slice(0, 3).map((product, idx) => (
                 <Link
                   key={product.id}
                   href={`/${restaurant.slug}/menu`}
@@ -181,6 +181,7 @@ export default async function RestaurantCommercialPage({
                         src={product.image_url}
                         alt={product.image_alt ?? product.name}
                         fill
+                        priority={idx === 0}
                         sizes="(max-width: 768px) 100vw, 33vw"
                         className="object-cover transition duration-500 group-hover:scale-105"
                       />
@@ -243,21 +244,41 @@ export default async function RestaurantCommercialPage({
                 {eventSpaces.map((space) => (
                   <div
                     key={space.id}
-                    className="flex flex-col justify-between rounded-3xl border border-obsidian-border bg-obsidian-card p-6"
+                    className="group flex flex-col justify-between overflow-hidden rounded-3xl border border-obsidian-border bg-obsidian-card"
                   >
                     <div>
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-obsidian px-3 py-1 font-mono text-xs text-gold border border-obsidian-border">
-                        <Users className="size-3.5 text-ember-glow" />
-                        {space.min_guests} – {space.capacity_seated} personas
-                      </span>
-                      <h3 className="mt-4 font-display text-2xl font-semibold text-ivory">
-                        {space.name}
-                      </h3>
-                      <p className="mt-2 text-sm leading-relaxed text-ivory-muted">
-                        {space.description}
-                      </p>
+                      {space.cover_image_url && (
+                        <div className="relative aspect-[16/10] w-full overflow-hidden bg-obsidian">
+                          <Image
+                            src={space.cover_image_url}
+                            alt={space.name}
+                            fill
+                            sizes="(max-width: 768px) 100vw, 33vw"
+                            className="object-cover transition duration-500 group-hover:scale-105"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-obsidian/80 via-transparent to-transparent" />
+                          <span className="absolute bottom-3 left-3.5 inline-flex items-center gap-1.5 rounded-full bg-obsidian/90 px-3 py-1 font-mono text-xs text-gold border border-obsidian-border">
+                            <Users className="size-3.5 text-ember-glow" />
+                            {space.min_guests} – {space.capacity_seated} personas
+                          </span>
+                        </div>
+                      )}
+                      <div className="p-6 pb-0">
+                        {!space.cover_image_url && (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-obsidian px-3 py-1 font-mono text-xs text-gold border border-obsidian-border">
+                            <Users className="size-3.5 text-ember-glow" />
+                            {space.min_guests} – {space.capacity_seated} personas
+                          </span>
+                        )}
+                        <h3 className="font-display text-2xl font-semibold text-ivory">
+                          {space.name}
+                        </h3>
+                        <p className="mt-2 text-sm leading-relaxed text-ivory-muted">
+                          {space.description}
+                        </p>
+                      </div>
                     </div>
-                    <div className="mt-5 border-t border-obsidian-border pt-4">
+                    <div className="m-6 mt-5 border-t border-obsidian-border pt-4">
                       <Link
                         href={`/${restaurant.slug}/eventos`}
                         className="inline-flex items-center gap-1.5 text-xs font-semibold text-ember-glow hover:underline"

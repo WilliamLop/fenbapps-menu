@@ -57,6 +57,7 @@ DECLARE
   v_ref_code text;
   v_inquiry_id uuid;
   v_restaurant_slug text;
+  v_prefix text;
 BEGIN
   IF p_privacy_accepted IS NOT TRUE THEN
     RAISE EXCEPTION 'Debes aceptar la política de tratamiento de datos personales.'
@@ -80,7 +81,7 @@ BEGIN
       AND rlb.action_name = 'submit_event_inquiry'
       AND rlb.created_at > (now() - interval '15 minutes');
 
-    IF v_recent_count >= 4 THEN
+    IF v_recent_count >= 12 THEN
       RAISE EXCEPTION 'Has enviado demasiadas solicitudes recientemente. Por favor intenta de nuevo en unos minutos.'
         USING ERRCODE = 'P0003';
     END IF;
@@ -94,7 +95,14 @@ BEGIN
       USING ERRCODE = 'P0004';
   END IF;
 
-  v_ref_code := upper(left(replace(v_restaurant_slug, '-', ''), 2))
+  v_prefix := CASE
+    WHEN strpos(v_restaurant_slug, '-') > 0 THEN
+      upper(left(split_part(v_restaurant_slug, '-', 1), 1) || left(split_part(v_restaurant_slug, '-', 2), 1))
+    ELSE
+      upper(left(v_restaurant_slug, 2))
+  END;
+
+  v_ref_code := v_prefix
     || '-'
     || to_char(CURRENT_DATE, 'YYMM')
     || '-'

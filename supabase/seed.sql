@@ -183,7 +183,7 @@ BEGIN
     'Canoa de Tuétano Asado & Tartar de Lomo',
     'Hueso de caña asado a la leña coronado con steak tartare cortado a cuchillo, yema curada y tostadas de masa madre.',
     'Una combinación intensa de texturas: la untuosidad del tuétano fundido al horno de leña se mezcla en la mesa con nuestro tartar de lomo fino aliñado con mostaza antigua, chalotas y alcaparras.',
-    58000, NULL, '/demo/casa-brasa/hero-steak.jpg',
+    58000, NULL, '/demo/casa-brasa/marrow-tartare.jpg',
     'Tuétano asado a la leña con tartar de lomo y masa madre',
     'available', false, true, false,
     ARRAY['Nuevo en Carta', 'Para Compartir'],
@@ -208,7 +208,7 @@ BEGIN
     'Tomahawk Imperial en Mesa · 45 Días Dry-Aged',
     'Espectacular corte con hueso largo de costilla (950g), flameado con mantequilla de hierbas y brandy frente al comensal.',
     'Seleccionado del centro del ribeye conservando el hueso intacto para proteger la jugosidad durante el asado lento. Incluye dos guarniciones artesanales a elección y trilogía de salsas de la casa.',
-    265000, NULL, '/demo/casa-brasa/hero-steak.jpg',
+    265000, NULL, '/demo/casa-brasa/tomahawk-steak.jpg',
     'Tomahawk imperial de 950 gramos servido para compartir',
     'available', true, false, false,
     ARRAY['Ideal 2–3 Personas', 'Experiencia en Mesa'],
@@ -220,7 +220,7 @@ BEGIN
     'Chuletón Wagyu Cross · Lote Reserva',
     'Marmoleo grado BMS 7, infiltración sedosa y costra caramelizada al carbón de quebracho blanco.',
     'Producción limitada de solo 6 porciones diarias según disponibilidad de nuestra cámara de maduración.',
-    195000, NULL, '/demo/casa-brasa/hero-steak.jpg',
+    195000, NULL, '/demo/casa-brasa/wagyu-chuleton.jpg',
     'Chuletón Wagyu Cross a la brasa',
     'sold_out', false, false, false,
     ARRAY['Cupo Diario Limitado'],
@@ -340,7 +340,7 @@ BEGIN
     22, 28, 10,
     ARRAY['100% Privado', 'Insonorizado', 'Mesa Imperial'],
     ARRAY['Pantalla 75" 4K oculta', 'Audio Bose independiente', 'Sommelier dedicado', 'Climatización propia', 'Wi-Fi empresarial dedicado'],
-    '/demo/casa-brasa/hero-steak.jpg', true, 1
+    '/demo/casa-brasa/salon-cava-cristal.jpg', true, 1
   ),
   (
     v_space_terrace_id, v_cb_id, v_loc_93_id, 'terraza-del-fuego',
@@ -350,7 +350,7 @@ BEGIN
     45, 65, 18,
     ARRAY['Semi-Privado o Exclusivo', 'Chimenea Viva', 'Iluminación Cálida'],
     ARRAY['Barra de coctelería móvil', 'Calefactores radiantes', 'Sonido ambiental', 'Valet Parking en puerta'],
-    '/demo/casa-brasa/smoked-cocktail.jpg', true, 2
+    '/demo/casa-brasa/salon-terraza-fuego.jpg', true, 2
   ),
   (
     v_space_roble_id, v_cb_id, v_loc_zg_id, 'gran-salon-de-roble',
@@ -360,7 +360,7 @@ BEGIN
     75, 95, 25,
     ARRAY['Planta Exclusiva', 'Parrilla a la Vista', 'Casona Patrimonial'],
     ARRAY['Sistema de micrófonos inalámbricos', 'Proyector láser HD', 'Estación de fuegos exclusiva', 'Guardarropa privado'],
-    '/demo/casa-brasa/octopus-starter.jpg', true, 3
+    '/demo/casa-brasa/salon-gran-roble.jpg', true, 3
   )
   ON CONFLICT (restaurant_id, slug) DO NOTHING;
 

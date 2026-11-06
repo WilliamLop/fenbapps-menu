@@ -26,16 +26,16 @@ export function RestaurantNavbar({
   activeTab,
 }: RestaurantNavbarProps) {
   return (
-    <header className="sticky top-0 z-40 border-b border-hairline bg-canvas/95 backdrop-blur-md">
+    <>
       {isDemo && (
         <div className="bg-obsidian text-ivory border-b border-obsidian-border px-4 py-2 text-xs">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-ember/25 px-2.5 py-0.5 font-medium text-ember-glow border border-ember/40">
-                <Sparkles className="size-3" />
-                Demo Comercial Interactiva
+                <Sparkles className="size-3 shrink-0" />
+                <span>Demo Comercial Interactiva</span>
               </span>
-              <span className="hidden text-ivory-muted sm:inline">
+              <span className="hidden text-ivory-muted md:inline">
                 Marca gastronómica ficticia para demostración de arquitectura Multi-Tenant.
               </span>
             </div>
@@ -43,80 +43,95 @@ export function RestaurantNavbar({
               href={`/dashboard/${slug}`}
               className="inline-flex items-center gap-1.5 rounded-md bg-ivory/10 px-2.5 py-1 font-medium text-ivory transition hover:bg-ivory/20"
             >
-              <LayoutDashboard className="size-3.5 text-gold" />
-              Abrir Dashboard Administrativo
+              <LayoutDashboard className="size-3.5 shrink-0 text-gold" />
+              <span>Consola Operativa</span>
             </Link>
           </div>
         </div>
       )}
 
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3.5 sm:px-6">
-        <Link
-          href={`/${slug}`}
-          className="group flex items-center gap-3 focus:outline-none"
-        >
-          <div className="flex size-10 items-center justify-center rounded-full bg-obsidian text-gold border border-obsidian-border transition group-hover:border-ember">
-            <Flame className="size-5 text-ember-glow" />
-          </div>
-          <div>
-            <span className="block font-display text-2xl font-semibold tracking-tight text-ink leading-none">
-              {name}
-            </span>
-            {cuisineType && (
-              <span className="mt-0.5 block text-[11px] font-medium uppercase tracking-[0.16em] text-ink-muted">
-                {cuisineType}
-              </span>
-            )}
-          </div>
-        </Link>
-
-        <nav
-          aria-label="Navegación principal del restaurante"
-          className="flex items-center gap-1 sm:gap-2"
-        >
-          {enabledModules.site && (
+      <header className="sticky top-0 z-40 border-b border-hairline bg-canvas/95 backdrop-blur-md">
+        <div className="mx-auto flex max-w-6xl flex-col gap-2.5 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-6 sm:py-3.5">
+          <div className="flex items-center justify-between gap-2">
             <Link
               href={`/${slug}`}
-              className={`inline-flex min-h-11 items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium transition ${
-                activeTab === "site"
-                  ? "bg-obsidian text-ivory shadow-sm"
-                  : "text-ink-muted hover:bg-canvas-muted hover:text-ink"
-              }`}
+              className="group flex min-w-0 items-center gap-2.5 sm:gap-3 focus:outline-none"
             >
-              <MapPin className="size-4 hidden sm:inline" />
-              <span>El Restaurante</span>
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-obsidian text-gold border border-obsidian-border transition group-hover:border-ember sm:size-10">
+                <Flame className="size-4 text-ember-glow sm:size-5" />
+              </div>
+              <div className="min-w-0">
+                <span className="block truncate font-display text-xl font-semibold tracking-tight text-ink leading-none sm:text-2xl">
+                  {name}
+                </span>
+                {cuisineType && (
+                  <span className="mt-0.5 block truncate text-[10px] font-medium uppercase tracking-[0.14em] text-ink-muted sm:text-[11px] sm:tracking-[0.16em]">
+                    {cuisineType}
+                  </span>
+                )}
+              </div>
             </Link>
-          )}
 
-          {enabledModules.menu && (
-            <Link
-              href={`/${slug}/menu`}
-              className={`inline-flex min-h-11 items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium transition ${
-                activeTab === "menu"
-                  ? "bg-ember text-ivory shadow-sm"
-                  : "text-ink-muted hover:bg-canvas-muted hover:text-ink"
-              }`}
-            >
-              <UtensilsCrossed className="size-4" />
-              <span>Carta Digital</span>
-            </Link>
-          )}
+            {enabledModules.events && (
+              <Link
+                href={`/${slug}/eventos#solicitud-cotizacion-eventos`}
+                className="inline-flex items-center gap-1 rounded-full border border-ember/30 bg-ember/10 px-2.5 py-1 text-[11px] font-semibold text-ember transition hover:bg-ember hover:text-ivory sm:hidden"
+              >
+                <Sparkles className="size-3 shrink-0" />
+                <span>Cotizar Evento</span>
+              </Link>
+            )}
+          </div>
 
-          {enabledModules.events && (
-            <Link
-              href={`/${slug}/eventos`}
-              className={`inline-flex min-h-11 items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium transition ${
-                activeTab === "events"
-                  ? "bg-obsidian text-ivory shadow-sm"
-                  : "text-ink-muted hover:bg-canvas-muted hover:text-ink"
-              }`}
-            >
-              <Sparkles className="size-4 text-ember" />
-              <span>Eventos & Salones</span>
-            </Link>
-          )}
-        </nav>
-      </div>
-    </header>
+          <nav
+            aria-label="Navegación principal del restaurante"
+            className="grid grid-cols-3 gap-1 rounded-full border border-hairline bg-canvas-muted/70 p-1 sm:flex sm:items-center sm:gap-1.5 sm:border-0 sm:bg-transparent sm:p-0"
+          >
+            {enabledModules.site && (
+              <Link
+                href={`/${slug}`}
+                className={`inline-flex min-h-9 sm:min-h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-xs font-medium transition sm:px-3.5 sm:py-2 sm:text-sm ${
+                  activeTab === "site"
+                    ? "bg-obsidian text-ivory shadow-sm"
+                    : "text-ink-muted hover:bg-canvas-muted hover:text-ink"
+                }`}
+              >
+                <MapPin className="hidden size-3.5 shrink-0 sm:inline" />
+                <span>El Restaurante</span>
+              </Link>
+            )}
+
+            {enabledModules.menu && (
+              <Link
+                href={`/${slug}/menu`}
+                className={`inline-flex min-h-9 sm:min-h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-xs font-medium transition sm:px-3.5 sm:py-2 sm:text-sm ${
+                  activeTab === "menu"
+                    ? "bg-ember text-ivory shadow-sm"
+                    : "text-ink-muted hover:bg-canvas-muted hover:text-ink"
+                }`}
+              >
+                <UtensilsCrossed className="size-3.5 shrink-0" />
+                <span>Carta Digital</span>
+              </Link>
+            )}
+
+            {enabledModules.events && (
+              <Link
+                href={`/${slug}/eventos`}
+                className={`inline-flex min-h-9 sm:min-h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-xs font-medium transition sm:px-3.5 sm:py-2 sm:text-sm ${
+                  activeTab === "events"
+                    ? "bg-obsidian text-ivory shadow-sm"
+                    : "text-ink-muted hover:bg-canvas-muted hover:text-ink"
+                }`}
+              >
+                <Sparkles className="size-3.5 shrink-0 text-ember" />
+                <span className="sm:hidden">Eventos</span>
+                <span className="hidden sm:inline">Eventos & Salones</span>
+              </Link>
+            )}
+          </nav>
+        </div>
+      </header>
+    </>
   );
 }

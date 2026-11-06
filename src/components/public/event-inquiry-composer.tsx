@@ -12,6 +12,7 @@ import {
   Building2,
   Clock,
   Info,
+  ArrowRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency, buildWhatsAppUrl } from "@/lib/utils";
@@ -85,6 +86,37 @@ export function EventInquiryComposer({
 
   const selectedPackage = packages.find((p) => p.id === selectedPackageId);
   const selectedSpace = spaces.find((s) => s.id === selectedSpaceId);
+
+  const estimatedTotal =
+    selectedPackage?.pricing_model === "per_person" &&
+    selectedPackage.base_price
+      ? Number(selectedPackage.base_price) * Math.max(1, guestCount)
+      : selectedPackage?.pricing_model === "fixed_package" &&
+          selectedPackage.base_price
+        ? Number(selectedPackage.base_price)
+        : null;
+
+  const maxAllowedInSelectedSpace = selectedSpace
+    ? Math.max(
+        selectedSpace.capacity_seated,
+        selectedSpace.capacity_cocktail ?? selectedSpace.capacity_seated
+      )
+    : null;
+
+  const exceedsSpaceSeated =
+    selectedSpace && guestCount > selectedSpace.capacity_seated;
+
+  function handleSelectSpace(space: EventSpaceRow) {
+    setSelectedSpaceId(space.id);
+    if (space.location_id) {
+      setSelectedLocationId(space.location_id);
+    }
+    if (guestCount < space.min_guests) {
+      setGuestCount(space.min_guests);
+    }
+    const formEl = document.getElementById("solicitud-cotizacion-eventos");
+    formEl?.scrollIntoView({ behavior: "smooth" });
+  }
 
   function handleSelectPackage(pkg: EventPackageRow) {
     setSelectedPackageId(pkg.id);
@@ -246,6 +278,26 @@ export function EventInquiryComposer({
                         </li>
                       ))}
                     </ul>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectSpace(space);
+                      }}
+                      className={`mt-4 inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition ${
+                        isSelected
+                          ? "bg-ember text-ivory shadow-sm"
+                          : "bg-canvas-muted text-ink hover:bg-obsidian hover:text-ivory"
+                      }`}
+                    >
+                      <span>
+                        {isSelected
+                          ? "Salón seleccionado · Ir a cotizar"
+                          : "Cotizar este salón"}
+                      </span>
+                      <ArrowRight className="size-3.5" />
+                    </button>
                   </div>
                 </div>
               </article>
@@ -757,6 +809,54 @@ export function EventInquiryComposer({
                   placeholder="Cuéntanos si requieres proyector, opciones vegetarianas, decoración de cumpleaños o factura corporativa..."
                   className="w-full rounded-xl border border-obsidian-border bg-obsidian-card p-3.5 text-sm text-ivory placeholder:text-ivory-muted/50 focus:border-ember focus:outline-none"
                 />
+              </div>
+
+              {/* Live Referential Budget & Capacity Estimator */}
+              <div className="rounded-2xl border border-gold/30 bg-obsidian-card/90 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="block text-[11px] font-semibold uppercase tracking-wider text-gold">
+                      Estimado referencial en vivo ({guestCount} invitados)
+                    </span>
+                    <span className="mt-0.5 block text-xs text-ivory-muted">
+                      {selectedPackage?.name ?? "Cotización personalizada"} ·{" "}
+                      {selectedSpace?.name ?? "Salón por definir"}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    {estimatedTotal !== null ? (
+                      <span className="tabular-price font-mono text-xl font-semibold text-ivory">
+                        {formatCurrency(estimatedTotal, currencyCode)}
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-gold/15 px-3 py-1 font-mono text-xs font-semibold text-gold">
+                        Propuesta a medida del Chef
+                      </span>
+                    )}
+                    {selectedPackage?.pricing_model === "per_person" &&
+                      selectedPackage.base_price && (
+                        <span className="tabular-price block font-mono text-[11px] text-ivory-muted">
+                          {formatCurrency(
+                            Number(selectedPackage.base_price),
+                            currencyCode
+                          )}{" "}
+                          / invitado
+                        </span>
+                      )}
+                  </div>
+                </div>
+
+                {exceedsSpaceSeated && selectedSpace && (
+                  <p className="mt-2.5 border-t border-obsidian-border pt-2 text-xs text-amber-warn">
+                    Nota de aforo: <strong>{selectedSpace.name}</strong> tiene capacidad máxima de{" "}
+                    <strong>{selectedSpace.capacity_seated} personas sentadas</strong>
+                    {maxAllowedInSelectedSpace &&
+                    maxAllowedInSelectedSpace > selectedSpace.capacity_seated
+                      ? ` (hasta ${maxAllowedInSelectedSpace} en formato cóctel)`
+                      : ""}
+                    . Nuestro equipo te sugerirá el montaje o salón ideal.
+                  </p>
+                )}
               </div>
 
               {/* Mandatory Habeas Data Checkbox (Colombia Ley 1581) */}
