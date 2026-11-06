@@ -13,9 +13,10 @@ import {
   ArrowRight,
   ShieldCheck,
 } from "lucide-react";
-import { getRestaurantBySlug, type OpeningHourSlot } from "@/modules/tenant/queries";
+import { getRestaurantBySlug } from "@/modules/tenant/queries";
 import { RestaurantNavbar } from "@/components/public/restaurant-navbar";
-import { formatCurrency, buildWhatsAppUrl } from "@/lib/utils";
+import { LocationsShowcase } from "@/components/public/locations-showcase";
+import { formatCurrency } from "@/lib/utils";
 
 interface RestaurantPageProps {
   params: Promise<{ restaurantSlug: string }>;
@@ -294,121 +295,13 @@ export default async function RestaurantCommercialPage({
           </section>
         )}
 
-        {/* Multi-Location Directory & Hours */}
-        {locations.length > 0 && (
-          <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-            <div className="mb-10 border-b border-hairline pb-5">
-              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-ember">
-                Ubicaciones & Contacto Directo
-              </span>
-              <h2 className="mt-1 font-display text-3xl font-semibold text-ink sm:text-4xl">
-                Nuestras Sedes y Horarios de Atención
-              </h2>
-            </div>
-
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-              {locations.map((loc) => {
-                const hours = Array.isArray(loc.opening_hours)
-                  ? (loc.opening_hours as unknown as OpeningHourSlot[])
-                  : [];
-                const waUrl = loc.whatsapp_phone
-                  ? buildWhatsAppUrl(
-                      loc.whatsapp_phone,
-                      `Hola ${restaurant.name} (${loc.name}), quisiera hacer una consulta.`
-                    )
-                  : null;
-
-                return (
-                  <div
-                    key={loc.id}
-                    className="flex flex-col justify-between rounded-3xl border border-hairline bg-canvas-elevated p-6 sm:p-8"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-ember">
-                          {loc.neighborhood ?? loc.city}
-                        </span>
-                        {loc.is_primary && (
-                          <span className="rounded-full bg-obsidian px-3 py-0.5 text-[11px] font-medium text-ivory">
-                            Sede Principal
-                          </span>
-                        )}
-                      </div>
-
-                      <h3 className="mt-2 font-display text-3xl font-semibold text-ink">
-                        {loc.name}
-                      </h3>
-
-                      <p className="mt-2 flex items-center gap-2 text-sm text-ink-muted">
-                        <MapPin className="size-4 shrink-0 text-ember" />
-                        <span>
-                          {loc.address_line} · {loc.city}
-                        </span>
-                      </p>
-
-                      {loc.highlights.length > 0 && (
-                        <div className="mt-4 flex flex-wrap gap-1.5">
-                          {loc.highlights.map((hl) => (
-                            <span
-                              key={hl}
-                              className="rounded-full bg-canvas-muted px-3 py-1 text-xs font-medium text-ink"
-                            >
-                              {hl}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {hours.length > 0 && (
-                        <div className="mt-6 border-t border-hairline pt-4">
-                          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink">
-                            <Clock className="size-3.5 text-ember" />
-                            <span>Horarios de servicio</span>
-                          </p>
-                          <div className="flex flex-col gap-1.5 text-xs text-ink-muted">
-                            {hours.map((slot, idx) => (
-                              <div
-                                key={idx}
-                                className="flex items-center justify-between"
-                              >
-                                <span className="font-medium text-ink">
-                                  {slot.days}
-                                </span>
-                                <span className="tabular-price font-mono">
-                                  {slot.hours}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-hairline pt-5">
-                      {waUrl && (
-                        <a
-                          href={waUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex min-h-11 items-center gap-2 rounded-full bg-obsidian px-5 py-2.5 text-xs font-semibold text-ivory transition hover:bg-ember"
-                        >
-                          <MessageCircle className="size-4 text-ember-glow" />
-                          <span>WhatsApp {loc.name}</span>
-                        </a>
-                      )}
-                      {loc.contact_phone && (
-                        <span className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-hairline px-4 py-2 text-xs font-mono text-ink-muted">
-                          <Phone className="size-3.5 text-ember" />
-                          {loc.contact_phone}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
+        {/* Multi-Location / Establishment Dossier with Galleries & Differentials */}
+        <LocationsShowcase
+          restaurantName={restaurant.name}
+          restaurantSlug={restaurant.slug}
+          locations={locations}
+          eventSpaces={eventSpaces}
+        />
       </main>
 
       <footer className="border-t border-hairline bg-canvas-elevated py-8 text-xs text-ink-muted">

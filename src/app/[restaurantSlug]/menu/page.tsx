@@ -49,11 +49,13 @@ export default async function RestaurantMenuPage({ params }: MenuPageProps) {
         <InteractiveMenuBrowser
           restaurantName={data.restaurant.name}
           currencyCode={data.restaurant.currency_code}
+          whatsappPhone={data.contact.whatsappPrimary}
           authenticityBadge={data.theme.authenticityBadge}
           serviceChargeNote={data.theme.serviceChargeNote}
           scheduleLabel={primaryMenu?.schedule_label}
           serviceNotes={primaryMenu?.service_notes}
           categories={data.categories}
+          locations={data.locations}
         />
       </main>
     </div>

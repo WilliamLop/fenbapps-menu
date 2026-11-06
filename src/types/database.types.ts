@@ -391,7 +391,11 @@ export type Database = {
           address_line: string
           city: string
           contact_phone: string | null
+          cover_image_url: string | null
           created_at: string
+          description: string | null
+          exclusive_features: string[]
+          gallery_urls: Json
           google_maps_url: string | null
           highlights: string[]
           id: string
@@ -410,7 +414,11 @@ export type Database = {
           address_line: string
           city?: string
           contact_phone?: string | null
+          cover_image_url?: string | null
           created_at?: string
+          description?: string | null
+          exclusive_features?: string[]
+          gallery_urls?: Json
           google_maps_url?: string | null
           highlights?: string[]
           id?: string
@@ -429,7 +437,11 @@ export type Database = {
           address_line?: string
           city?: string
           contact_phone?: string | null
+          cover_image_url?: string | null
           created_at?: string
+          description?: string | null
+          exclusive_features?: string[]
+          gallery_urls?: Json
           google_maps_url?: string | null
           highlights?: string[]
           id?: string
@@ -630,6 +642,7 @@ export type Database = {
           category_id: string
           compare_at_price: number | null
           created_at: string
+          exclusive_location_id: string | null
           id: string
           image_alt: string | null
           image_url: string | null
@@ -638,6 +651,7 @@ export type Database = {
           is_new: boolean
           long_description: string | null
           name: string
+          pairing_note: string | null
           portion_label: string | null
           restaurant_id: string
           short_description: string | null
@@ -652,6 +666,7 @@ export type Database = {
           category_id: string
           compare_at_price?: number | null
           created_at?: string
+          exclusive_location_id?: string | null
           id?: string
           image_alt?: string | null
           image_url?: string | null
@@ -660,6 +675,7 @@ export type Database = {
           is_new?: boolean
           long_description?: string | null
           name: string
+          pairing_note?: string | null
           portion_label?: string | null
           restaurant_id: string
           short_description?: string | null
@@ -674,6 +690,7 @@ export type Database = {
           category_id?: string
           compare_at_price?: number | null
           created_at?: string
+          exclusive_location_id?: string | null
           id?: string
           image_alt?: string | null
           image_url?: string | null
@@ -682,6 +699,7 @@ export type Database = {
           is_new?: boolean
           long_description?: string | null
           name?: string
+          pairing_note?: string | null
           portion_label?: string | null
           restaurant_id?: string
           short_description?: string | null
@@ -695,6 +713,13 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_exclusive_location_id_fkey"
+            columns: ["exclusive_location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
             referencedColumns: ["id"]
           },
           {

@@ -270,7 +270,7 @@ export async function getRestaurantBySlug(
 
   const cachedFn = unstable_cache(
     async () => fetchRestaurantAggregateUncached(sanitizedSlug),
-    [`tenant-aggregate-v2-${sanitizedSlug}`],
+    [`tenant-aggregate-v4-${sanitizedSlug}`],
     {
       tags: [
         `tenant:${sanitizedSlug}`,

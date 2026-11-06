@@ -250,14 +250,14 @@ BEGIN
     ARRAY['Autor', 'Ahumado en Mesa'],
     'Esfera de hielo · Bourbon 2 oz', 1
   ),
-  -- Compact List Category (No Photos by Design -> Editorial Wine & Sides List)
+  -- Compact List Category (Editorial Wine & Sides List with Reference Thumbnails)
   (
     '11111111-1111-4111-8111-111111111430', v_cb_id, v_cat_cellar_id,
     'catena-zapata-malbec-argentino',
     'Catena Zapata Malbec · Mendoza, Argentina',
     'Notas de ciruela negra, violetas, cuero sutil y crianza de 14 meses en roble francés.',
     NULL,
-    245000, NULL, NULL, NULL,
+    245000, NULL, '/demo/casa-brasa/wine-malbec.jpg', 'Copa Riedel de vino tinto Malbec en cava',
     'available', false, false, true,
     ARRAY['Cava Sommelier', 'Botella 750ml'],
     'Botella 750 ml', 1
@@ -268,7 +268,7 @@ BEGIN
     'Marqués de Murrieta Reserva · D.O.Ca. Rioja, España',
     'Tempranillo equilibrado con fruta roja madura, especias dulces y final mineral.',
     NULL,
-    285000, NULL, NULL, NULL,
+    285000, NULL, '/demo/casa-brasa/wine-rioja.jpg', 'Botella y copa de Marqués de Murrieta Reserva Rioja',
     'available', false, false, false,
     ARRAY['D.O.Ca. Rioja', 'Botella 750ml'],
     'Botella 750 ml', 2
@@ -279,7 +279,7 @@ BEGIN
     'Espárragos Verdes & Portobellos al Rescoldo',
     'Terminados con reducción balsámica añeja, lascas de Parmigiano Reggiano y aceite de trufa blanca.',
     NULL,
-    26000, NULL, NULL, NULL,
+    26000, NULL, '/demo/casa-brasa/side-asparagus.jpg', 'Espárragos verdes y portobellos asados al rescoldo',
     'available', false, false, false,
     ARRAY['Vegetariano', 'Sin Gluten'],
     'Guarnición al centro', 3
@@ -290,7 +290,7 @@ BEGIN
     'Gratinado de Quesos Madurados & Trufa Negra',
     'Pasta artesanal gratinada en sartén de hierro fundido con gruyère, provolone ahumado y miga panko crujiente.',
     NULL,
-    29000, NULL, NULL, NULL,
+    29000, NULL, '/demo/casa-brasa/side-truffle-gratin.jpg', 'Gratinado de quesos madurados y trufa negra en sartén de hierro',
     'available', false, false, false,
     ARRAY['Vegetariano', 'Hierro Fundido'],
     'Guarnición al centro', 4

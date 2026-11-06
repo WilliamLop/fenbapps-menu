@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useMemo } from "react";
 import Image from "next/image";
 import {
   Users,
@@ -13,6 +13,11 @@ import {
   Clock,
   Info,
   ArrowRight,
+  MapPin,
+  Images,
+  ChevronLeft,
+  ChevronRight,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency, buildWhatsAppUrl } from "@/lib/utils";
@@ -40,6 +45,60 @@ interface EventInquiryComposerProps {
   packages: EventPackageRow[];
 }
 
+const CELEBRATION_PRESETS = [
+  "Cumpleaños",
+  "Cena Corporativa / Junta Directiva",
+  "Aniversario / Pedida de Mano",
+  "Grado / Celebración Familiar",
+  "Despedida / Cierre de Año",
+  "Otro / A medida",
+] as const;
+
+function getDefaultFutureDateString(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 14);
+  return d.toISOString().slice(0, 10);
+}
+
+function extractGalleryUrls(
+  rawGallery: unknown,
+  fallbackCover: string | null
+): string[] {
+  const urls: string[] = [];
+  if (Array.isArray(rawGallery)) {
+    for (const item of rawGallery) {
+      if (typeof item === "string" && item.trim().length > 0) {
+        urls.push(item);
+      }
+    }
+  }
+  if (urls.length === 0 && fallbackCover) {
+    urls.push(fallbackCover);
+  }
+  return urls;
+}
+
+function extractPackageExtras(rawExtras: unknown): PackageExtraItem[] {
+  if (!Array.isArray(rawExtras)) return [];
+  const result: PackageExtraItem[] = [];
+  for (const item of rawExtras) {
+    if (
+      typeof item === "object" &&
+      item !== null &&
+      "name" in item &&
+      "price" in item &&
+      typeof (item as Record<string, unknown>).name === "string" &&
+      typeof (item as Record<string, unknown>).price === "string"
+    ) {
+      result.push({
+        name: String((item as Record<string, unknown>).name),
+        price: String((item as Record<string, unknown>).price),
+      });
+    }
+  }
+  return result;
+}
+
 export function EventInquiryComposer({
   restaurantId,
   restaurantSlug,
@@ -51,27 +110,41 @@ export function EventInquiryComposer({
   spaces,
   packages,
 }: EventInquiryComposerProps) {
+  const [spaceLocationFilter, setSpaceLocationFilter] = useState<string>("all");
+  const [activeSlideBySpace, setActiveSlideBySpace] = useState<
+    Record<string, number>
+  >({});
+  const [lightboxSpace, setLightboxSpace] = useState<{
+    space: EventSpaceRow;
+    images: string[];
+    index: number;
+  } | null>(null);
+
+  const [selectedLocationId, setSelectedLocationId] = useState<string>(
+    locations[0]?.id ?? ""
+  );
   const [selectedSpaceId, setSelectedSpaceId] = useState<string>(
     spaces[0]?.id ?? ""
   );
   const [selectedPackageId, setSelectedPackageId] = useState<string>(
     packages[0]?.id ?? ""
   );
-  const [selectedLocationId, setSelectedLocationId] = useState<string>(
-    locations[0]?.id ?? ""
-  );
 
-  const [eventType, setEventType] = useState<string>(
-    "Cena Corporativa / Cierre de Año"
+  // Pillar 1: Quick-select celebration preset + custom text when "Otro / A medida" is chosen
+  const [celebrationPreset, setCelebrationPreset] = useState<string>(
+    "Cumpleaños"
   );
-  const [tentativeDate, setTentativeDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 14);
-    return d.toISOString().split("T")[0] ?? "";
-  });
+  const [customCelebrationText, setCustomCelebrationText] =
+    useState<string>("");
+
+  const [tentativeDate, setTentativeDate] = useState<string>(
+    getDefaultFutureDateString()
+  );
   const [preferredTimeSlot, setPreferredTimeSlot] =
     useState<(typeof TIME_SLOT_VALUES)[number]>("dinner");
   const [guestCount, setGuestCount] = useState<number>(20);
+  const [selectedExtras, setSelectedExtras] = useState<string[]>([]);
+
   const [customerName, setCustomerName] = useState<string>("");
   const [customerPhone, setCustomerPhone] = useState<string>("");
   const [customerEmail, setCustomerEmail] = useState<string>("");
@@ -84,13 +157,57 @@ export function EventInquiryComposer({
   const [submittedRefCode, setSubmittedRefCode] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  const locationMap = useMemo(() => {
+    const map = new Map<string, LocationRow>();
+    for (const loc of locations) {
+      map.set(loc.id, loc);
+    }
+    return map;
+  }, [locations]);
+
+  const filteredSpaces = useMemo(() => {
+    if (spaceLocationFilter === "all") return spaces;
+    return spaces.filter(
+      (sp) => !sp.location_id || sp.location_id === spaceLocationFilter
+    );
+  }, [spaces, spaceLocationFilter]);
+
   const selectedPackage = packages.find((p) => p.id === selectedPackageId);
   const selectedSpace = spaces.find((s) => s.id === selectedSpaceId);
+  const selectedSpaceLocation = selectedSpace?.location_id
+    ? locationMap.get(selectedSpace.location_id)
+    : null;
+
+  const effectiveEventType =
+    celebrationPreset === "Otro / A medida"
+      ? customCelebrationText.trim() || "Celebración Especial a Medida"
+      : celebrationPreset;
+
+  // Parse package optional extras and numeric value if per_person
+  const availablePackageExtras = useMemo<PackageExtraItem[]>(() => {
+    if (!selectedPackage) return [];
+    return extractPackageExtras(selectedPackage.optional_extras);
+  }, [selectedPackage]);
+
+  const extrasPerPersonDelta = useMemo(() => {
+    let delta = 0;
+    for (const ext of availablePackageExtras) {
+      if (selectedExtras.includes(ext.name)) {
+        // Extract numeric digits if string contains "/ persona"
+        if (ext.price.toLowerCase().includes("persona")) {
+          const digits = ext.price.replace(/[^0-9]/g, "");
+          if (digits) delta += Number(digits);
+        }
+      }
+    }
+    return delta;
+  }, [availablePackageExtras, selectedExtras]);
 
   const estimatedTotal =
     selectedPackage?.pricing_model === "per_person" &&
     selectedPackage.base_price
-      ? Number(selectedPackage.base_price) * Math.max(1, guestCount)
+      ? (Number(selectedPackage.base_price) + extrasPerPersonDelta) *
+        Math.max(1, guestCount)
       : selectedPackage?.pricing_model === "fixed_package" &&
           selectedPackage.base_price
         ? Number(selectedPackage.base_price)
@@ -120,11 +237,28 @@ export function EventInquiryComposer({
 
   function handleSelectPackage(pkg: EventPackageRow) {
     setSelectedPackageId(pkg.id);
+    setSelectedExtras([]);
     if (guestCount < pkg.min_guests) {
       setGuestCount(pkg.min_guests);
     }
+    // Pillar 1: Auto-sync celebration type preset with chosen package!
+    if (pkg.event_category === "birthday") {
+      setCelebrationPreset("Cumpleaños");
+    } else if (pkg.event_category === "corporate") {
+      setCelebrationPreset("Cena Corporativa / Junta Directiva");
+    } else if (pkg.event_category === "private_dining") {
+      setCelebrationPreset("Aniversario / Pedida de Mano");
+    }
     const formEl = document.getElementById("solicitud-cotizacion-eventos");
     formEl?.scrollIntoView({ behavior: "smooth" });
+  }
+
+  function toggleExtra(extraName: string) {
+    setSelectedExtras((prev) =>
+      prev.includes(extraName)
+        ? prev.filter((item) => item !== extraName)
+        : [...prev, extraName]
+    );
   }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -138,6 +272,15 @@ export function EventInquiryComposer({
       return;
     }
 
+    const enrichedSpecialRequests = [
+      specialRequests.trim(),
+      selectedExtras.length > 0
+        ? `Adicionales de interés: ${selectedExtras.join(", ")}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" | ");
+
     startTransition(async () => {
       const result = await submitEventInquiryAction({
         restaurantId,
@@ -145,7 +288,7 @@ export function EventInquiryComposer({
         locationId: selectedLocationId || null,
         eventSpaceId: selectedSpaceId || null,
         eventPackageId: selectedPackageId || null,
-        eventType,
+        eventType: effectiveEventType,
         tentativeDate,
         preferredTimeSlot,
         guestCount,
@@ -153,7 +296,7 @@ export function EventInquiryComposer({
         customerPhone,
         customerEmail,
         companyName,
-        specialRequests,
+        specialRequests: enrichedSpecialRequests,
         privacyAccepted: true,
         websiteHoneypot,
       });
@@ -177,36 +320,105 @@ export function EventInquiryComposer({
     ? buildWhatsAppUrl(
         whatsappPhone,
         `Hola equipo de ${restaurantName}, acabo de registrar la solicitud de evento *${submittedRefCode}*:\n` +
-          `• Evento: ${eventType}\n` +
+          `• Celebración: ${effectiveEventType}\n` +
           `• Fecha tentativa: ${tentativeDate} (${TIME_SLOT_LABELS[preferredTimeSlot]})\n` +
           `• Invitados estimados: ${guestCount} personas\n` +
-          `• Salón de interés: ${selectedSpace?.name ?? "Por definir"}\n` +
+          `• Sede y Salón: ${selectedSpace?.name ?? "Por definir"}${
+            selectedSpaceLocation ? ` (${selectedSpaceLocation.name})` : ""
+          }\n` +
           `• Paquete: ${selectedPackage?.name ?? "Cotización a medida"}\n` +
+          (selectedExtras.length > 0
+            ? `• Extras seleccionados: ${selectedExtras.join(", ")}\n`
+            : "") +
+          (estimatedTotal !== null
+            ? `• Estimado referencial: ${formatCurrency(
+                estimatedTotal,
+                currencyCode
+              )}\n`
+            : "") +
           `• Contacto: ${customerName} (${customerPhone})`
       )
     : "#";
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
-      {/* Section 1: Private Event Spaces Architectural Dossier */}
+      {/* Section 1: Private Event Spaces Architectural Dossier with Multi-Image Galleries */}
       <section className="mb-16">
-        <div className="mb-8 flex flex-col justify-between gap-3 border-b border-hairline pb-5 md:flex-row md:items-end">
+        <div className="mb-6 flex flex-col justify-between gap-4 border-b border-hairline pb-5 md:flex-row md:items-end">
           <div>
             <span className="text-xs font-semibold uppercase tracking-[0.18em] text-ember">
-              Arquitectura & Hospitalidad Privada
+              {spaces.length === 1
+                ? "El Espacio para tu Celebración"
+                : "Arquitectura & Hospitalidad Privada"}
             </span>
             <h2 className="mt-1 font-display text-3xl font-semibold text-ink sm:text-4xl">
-              Nuestros Salones & Espacios Exclusivos
+              {spaces.length === 1
+                ? "Nuestro Salón Principal para Eventos y Grupos"
+                : "Nuestros Salones & Espacios Exclusivos"}
             </h2>
           </div>
           <p className="max-w-md text-sm text-ink-muted">
-            Cada espacio cuenta con equipamiento audiovisual, climatización e iluminación cálida pensada para eventos empresariales y celebraciones familiares.
+            Explora la galería fotográfica de cada espacio, verifica en qué sede se encuentra y compara sus capacidades en montaje sentado o cóctel.
           </p>
         </div>
 
+        {/* Location Filter for Multi-Location Restaurants (Hidden automatically if restaurant has 1 location) */}
+        {locations.length > 1 && spaces.length > 1 && (
+          <div className="mb-7 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-hairline bg-canvas-elevated px-4 py-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-ink">
+              <MapPin className="size-4 text-ember" />
+              <span>Filtrar salones por sede del restaurante:</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSpaceLocationFilter("all")}
+                className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
+                  spaceLocationFilter === "all"
+                    ? "bg-obsidian text-ivory"
+                    : "bg-canvas-muted text-ink-muted hover:text-ink"
+                }`}
+              >
+                Todas las sedes ({spaces.length} salones)
+              </button>
+              {locations.map((loc) => {
+                const countInLoc = spaces.filter(
+                  (s) => s.location_id === loc.id
+                ).length;
+                return (
+                  <button
+                    key={loc.id}
+                    type="button"
+                    onClick={() => setSpaceLocationFilter(loc.id)}
+                    className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
+                      spaceLocationFilter === loc.id
+                        ? "bg-ember text-ivory"
+                        : "bg-canvas-muted text-ink-muted hover:text-ink"
+                    }`}
+                  >
+                    {loc.name} ({countInLoc})
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {spaces.map((space) => {
+          {filteredSpaces.map((space) => {
             const isSelected = selectedSpaceId === space.id;
+            const spaceLoc = space.location_id
+              ? locationMap.get(space.location_id)
+              : null;
+            const gallery = extractGalleryUrls(
+              space.gallery_urls,
+              space.cover_image_url
+            );
+            const currentSlideIdx =
+              (activeSlideBySpace[space.id] ?? 0) % Math.max(1, gallery.length);
+            const activeImageSrc =
+              gallery[currentSlideIdx] ?? space.cover_image_url;
+
             return (
               <article
                 key={space.id}
@@ -217,16 +429,87 @@ export function EventInquiryComposer({
                     : "border-hairline bg-canvas-elevated hover:border-ink/30"
                 }`}
               >
-                {space.cover_image_url && (
+                {activeImageSrc && (
                   <div className="relative aspect-[16/10] w-full overflow-hidden bg-obsidian">
                     <Image
-                      src={space.cover_image_url}
-                      alt={space.name}
+                      src={activeImageSrc}
+                      alt={`${space.name} — Vista ${currentSlideIdx + 1}`}
                       fill
                       sizes="(max-width: 1024px) 100vw, 33vw"
-                      className="object-cover transition duration-500 group-hover:scale-105"
+                      className="object-cover transition duration-500"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-obsidian/80 via-transparent to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-obsidian/85 via-transparent to-obsidian/35" />
+
+                    {/* Top Bar: Location Differential Badge + Open Lightbox Gallery Button */}
+                    <div className="absolute left-3.5 right-3.5 top-3 flex items-center justify-between gap-2">
+                      {spaceLoc && locations.length > 1 ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-obsidian/90 px-2.5 py-1 text-[11px] font-medium text-gold border border-obsidian-border">
+                          <MapPin className="size-3 text-ember-glow" />
+                          <span>{spaceLoc.name}</span>
+                        </span>
+                      ) : (
+                        <span />
+                      )}
+
+                      {gallery.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setLightboxSpace({
+                              space,
+                              images: gallery,
+                              index: currentSlideIdx,
+                            });
+                          }}
+                          className="inline-flex items-center gap-1 rounded-full bg-obsidian/90 px-2.5 py-1 text-[11px] font-medium text-ivory border border-obsidian-border transition hover:bg-ember"
+                        >
+                          <Images className="size-3 text-ember-glow" />
+                          <span>
+                            Galería ({currentSlideIdx + 1}/{gallery.length})
+                          </span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Interactive Prev/Next Carousel Controls on Card */}
+                    {gallery.length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          aria-label="Foto anterior del salón"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveSlideBySpace((prev) => ({
+                              ...prev,
+                              [space.id]:
+                                (currentSlideIdx - 1 + gallery.length) %
+                                gallery.length,
+                            }));
+                          }}
+                          className="absolute left-2.5 top-1/2 -translate-y-1/2 flex size-8 items-center justify-center rounded-full bg-obsidian/75 text-ivory transition hover:bg-obsidian"
+                        >
+                          <ChevronLeft className="size-4" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Siguiente foto del salón"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveSlideBySpace((prev) => ({
+                              ...prev,
+                              [space.id]:
+                                (currentSlideIdx + 1) % gallery.length,
+                            }));
+                          }}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 flex size-8 items-center justify-center rounded-full bg-obsidian/75 text-ivory transition hover:bg-obsidian"
+                        >
+                          <ChevronRight className="size-4" />
+                        </button>
+                      </>
+                    )}
+
+                    {/* Bottom Capacity Bar */}
                     <div className="absolute bottom-3 left-3.5 right-3.5 flex items-center justify-between text-xs text-ivory">
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-obsidian/90 px-3 py-1 font-mono font-medium">
                         <Users className="size-3.5 text-ember-glow" />
@@ -238,6 +521,38 @@ export function EventInquiryComposer({
                         </span>
                       )}
                     </div>
+                  </div>
+                )}
+
+                {/* Thumbnail Strip for Quick Multi-Angle Preview */}
+                {gallery.length > 1 && (
+                  <div className="grid grid-cols-4 gap-1.5 border-b border-hairline bg-canvas px-4 py-2">
+                    {gallery.slice(0, 4).map((imgUrl, idx) => (
+                      <button
+                        key={imgUrl + idx}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActiveSlideBySpace((prev) => ({
+                            ...prev,
+                            [space.id]: idx,
+                          }));
+                        }}
+                        className={`relative aspect-[16/10] overflow-hidden rounded-lg border transition ${
+                          currentSlideIdx === idx
+                            ? "border-ember ring-1 ring-ember"
+                            : "border-hairline opacity-65 hover:opacity-100"
+                        }`}
+                      >
+                        <Image
+                          src={imgUrl}
+                          alt={`${space.name} miniatura ${idx + 1}`}
+                          fill
+                          sizes="80px"
+                          className="object-cover"
+                        />
+                      </button>
+                    ))}
                   </div>
                 )}
 
@@ -306,19 +621,19 @@ export function EventInquiryComposer({
         </div>
       </section>
 
-      {/* Section 2: Commercial Event Packages */}
+      {/* Section 2: Commercial Event Packages & Visual Experiences */}
       <section className="mb-16">
         <div className="mb-8 flex flex-col justify-between gap-3 border-b border-hairline pb-5 md:flex-row md:items-end">
           <div>
             <span className="text-xs font-semibold uppercase tracking-[0.18em] text-ember">
-              Propuestas Gastronómicas Claras
+              Propuestas Gastronómicas con Referencia Visual
             </span>
             <h2 className="mt-1 font-display text-3xl font-semibold text-ink sm:text-4xl">
               Paquetes Comerciales & Experiencias
             </h2>
           </div>
           <p className="max-w-md text-sm text-ink-muted">
-            Precios transparentes con menús diseñados para grupos. Selecciona el paquete que mejor se adapte a tu celebración para pre-cargar tu solicitud.
+            Precios transparentes con menús diseñados para grupos. Al elegir una experiencia, tu tipo de celebración y presupuesto se pre-cargan automáticamente abajo.
           </p>
         </div>
 
@@ -330,125 +645,167 @@ export function EventInquiryComposer({
                   (item): item is string => typeof item === "string"
                 )
               : [];
-            const extrasList = Array.isArray(pkg.optional_extras)
-              ? (pkg.optional_extras as unknown as PackageExtraItem[])
-              : [];
+            const extrasList = extractPackageExtras(pkg.optional_extras);
 
             return (
               <article
                 key={pkg.id}
-                className={`flex flex-col justify-between rounded-3xl border p-6 sm:p-7 transition ${
-                  isSelected
-                    ? "border-ember bg-obsidian text-ivory shadow-xl"
-                    : "border-hairline bg-canvas-elevated text-ink hover:border-ember/40"
+                className={`group flex flex-col justify-between overflow-hidden rounded-3xl border transition ${
+                  pkg.is_featured && isSelected
+                    ? "border-ember bg-obsidian text-ivory shadow-xl ring-2 ring-ember"
+                    : pkg.is_featured
+                      ? "border-obsidian-border bg-obsidian text-ivory shadow-lg"
+                      : isSelected
+                        ? "border-ember bg-canvas-elevated text-ink ring-2 ring-ember"
+                        : "border-hairline bg-canvas-elevated text-ink"
                 }`}
               >
                 <div>
-                  <div className="flex items-center justify-between gap-2">
-                    {pkg.badge_label && (
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                          isSelected
-                            ? "bg-ember text-ivory"
-                            : "bg-canvas-muted text-ember"
-                        }`}
-                      >
-                        {pkg.badge_label}
-                      </span>
-                    )}
-                    <span
-                      className={`tabular-price font-mono text-xs ${
-                        isSelected ? "text-ivory-muted" : "text-ink-muted"
-                      }`}
-                    >
-                      {pkg.min_guests} a {pkg.max_guests ?? 95} invitados
-                    </span>
-                  </div>
-
-                  <h3 className="mt-4 font-display text-3xl font-semibold">
-                    {pkg.name}
-                  </h3>
-
-                  <div className="mt-3 flex items-baseline gap-2 border-b border-current/15 pb-4">
-                    {pkg.pricing_model === "per_person" && pkg.base_price ? (
-                      <>
-                        <span className="tabular-price font-mono text-2xl font-bold text-ember-glow">
-                          {formatCurrency(Number(pkg.base_price), currencyCode)}
-                        </span>
-                        <span
-                          className={`text-xs ${
-                            isSelected ? "text-ivory-muted" : "text-ink-muted"
-                          }`}
-                        >
-                          / por invitado (IVA incluido)
-                        </span>
-                      </>
-                    ) : (
-                      <span className="font-mono text-lg font-semibold text-gold">
-                        Cotización Personalizada a Medida
-                      </span>
-                    )}
-                  </div>
-
-                  <p
-                    className={`mt-4 text-sm leading-relaxed ${
-                      isSelected ? "text-ivory-muted" : "text-ink-muted"
-                    }`}
-                  >
-                    {pkg.description}
-                  </p>
-
-                  <div className="mt-5">
-                    <p
-                      className={`mb-2.5 text-xs font-semibold uppercase tracking-wider ${
-                        isSelected ? "text-gold" : "text-ink"
-                      }`}
-                    >
-                      ¿Qué incluye la experiencia?
-                    </p>
-                    <ul className="flex flex-col gap-2 text-xs leading-relaxed">
-                      {includesList.map((item) => (
-                        <li key={item} className="flex items-start gap-2">
-                          <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-ember-glow" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  {extrasList.length > 0 && (
-                    <div className="mt-5 rounded-2xl bg-current/5 p-3.5 text-xs">
-                      <p className="font-semibold mb-1.5">
-                        Adicionales opcionales:
-                      </p>
-                      {extrasList.map((ext, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center justify-between gap-2 py-0.5"
-                        >
-                          <span className="opacity-85">{ext.name}</span>
-                          <span className="tabular-price font-mono font-semibold">
-                            {ext.price}
+                  {/* Pillar 3B: Visual Experience Cover Image on Package Card */}
+                  {pkg.cover_image_url && (
+                    <div className="relative aspect-[16/9] w-full overflow-hidden bg-obsidian">
+                      <Image
+                        src={pkg.cover_image_url}
+                        alt={pkg.name}
+                        fill
+                        sizes="(max-width: 1024px) 100vw, 33vw"
+                        className="object-cover transition duration-500 group-hover:scale-105"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-obsidian/85 via-obsidian/20 to-transparent" />
+                      <div className="absolute left-4 right-4 top-3.5 flex items-center justify-between gap-2">
+                        {pkg.badge_label && (
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                              pkg.is_featured
+                                ? "bg-ember text-ivory"
+                                : "bg-obsidian/90 text-gold border border-gold/30"
+                            }`}
+                          >
+                            {pkg.badge_label}
                           </span>
-                        </div>
-                      ))}
+                        )}
+                        <span className="tabular-price rounded-full bg-obsidian/90 px-2.5 py-1 font-mono text-xs text-ivory">
+                          {pkg.min_guests} a {pkg.max_guests ?? 95} inv.
+                        </span>
+                      </div>
+                      {pkg.duration_hours && (
+                        <span className="absolute bottom-3 left-4 inline-flex items-center gap-1 text-xs font-medium text-ivory/90">
+                          <Clock className="size-3.5 text-ember-glow" />
+                          Duración incluida: {Number(pkg.duration_hours)} horas
+                        </span>
+                      )}
                     </div>
                   )}
+
+                  <div className="p-6 sm:p-7">
+                    <h3 className="font-display text-2xl font-semibold leading-tight">
+                      {pkg.name}
+                    </h3>
+
+                    <div className="mt-3 border-b border-current/10 pb-4">
+                      {pkg.pricing_model === "per_person" && pkg.base_price ? (
+                        <div>
+                          <span className="tabular-price font-mono text-2xl font-bold text-ember-glow">
+                            {formatCurrency(
+                              Number(pkg.base_price),
+                              currencyCode
+                            )}
+                          </span>
+                          <span
+                            className={`ml-1.5 text-xs ${
+                              pkg.is_featured
+                                ? "text-ivory-muted"
+                                : "text-ink-muted"
+                            }`}
+                          >
+                            / por invitado (IVA incluido)
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="font-mono text-sm font-semibold uppercase tracking-wider text-gold">
+                          Cotización Personalizada a Medida
+                        </span>
+                      )}
+                    </div>
+
+                    <p
+                      className={`mt-4 text-sm leading-relaxed ${
+                        pkg.is_featured ? "text-ivory-muted" : "text-ink-muted"
+                      }`}
+                    >
+                      {pkg.description}
+                    </p>
+
+                    <div className="mt-5">
+                      <p className="mb-2.5 text-xs font-semibold uppercase tracking-wider">
+                        ¿Qué incluye la experiencia?
+                      </p>
+                      <ul className="space-y-2 text-xs">
+                        {includesList.map((item) => (
+                          <li key={item} className="flex items-start gap-2">
+                            <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-ember-glow" />
+                            <span
+                              className={
+                                pkg.is_featured
+                                  ? "text-ivory/90"
+                                  : "text-ink/90"
+                              }
+                            >
+                              {item}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {extrasList.length > 0 && (
+                      <div className="mt-5 border-t border-current/10 pt-4">
+                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-gold">
+                          Adicionales opcionales
+                        </p>
+                        <ul className="space-y-1.5 text-xs">
+                          {extrasList.map((ext) => (
+                            <li
+                              key={ext.name}
+                              className="flex items-baseline justify-between gap-2"
+                            >
+                              <span
+                                className={
+                                  pkg.is_featured
+                                    ? "text-ivory-muted"
+                                    : "text-ink-muted"
+                                }
+                              >
+                                + {ext.name}
+                              </span>
+                              <span className="tabular-price shrink-0 font-mono text-[11px] font-semibold">
+                                {ext.price}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div className="mt-6 pt-4">
+                <div className="p-6 pt-0 sm:px-7 sm:pb-7">
                   <button
                     type="button"
                     onClick={() => handleSelectPackage(pkg)}
-                    className={`w-full min-h-11 rounded-full px-5 py-3 text-sm font-semibold transition ${
+                    className={`inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full px-5 py-2.5 text-xs font-semibold uppercase tracking-wider transition ${
                       isSelected
-                        ? "bg-ember text-ivory hover:bg-ember-hover"
-                        : "bg-obsidian text-ivory hover:bg-ember"
+                        ? "bg-ember text-ivory shadow-md"
+                        : pkg.is_featured
+                          ? "bg-ivory text-obsidian hover:bg-ember hover:text-ivory"
+                          : "bg-obsidian text-ivory hover:bg-ember"
                     }`}
                   >
-                    {isSelected
-                      ? "Paquete Seleccionado · Cotizar abajo"
-                      : "Elegir este paquete para cotizar"}
+                    <span>
+                      {isSelected
+                        ? "Paquete Seleccionado · Cotizar abajo"
+                        : "Elegir este paquete para cotizar"}
+                    </span>
                   </button>
                 </div>
               </article>
@@ -457,54 +814,73 @@ export function EventInquiryComposer({
         </div>
       </section>
 
-      {/* Section 3: Hardened Inquiry Form (Persists in PostgreSQL + WhatsApp Bridge) */}
+      {/* Section 3: Transactional Inquiry Form + Instant WhatsApp Bridge */}
       <section
         id="solicitud-cotizacion-eventos"
-        className="scroll-mt-24 rounded-3xl border border-obsidian-border bg-obsidian p-6 text-ivory shadow-2xl sm:p-10"
+        className="scroll-mt-28 rounded-3xl border border-obsidian-border bg-obsidian p-6 text-ivory shadow-2xl sm:p-10"
       >
         {submittedRefCode ? (
+          /* Post-Submission Confirmation State (D3 Decision) */
           <div className="mx-auto max-w-2xl py-6 text-center">
-            <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-sage/20 text-sage border border-sage/40">
-              <CheckCircle2 className="size-8" />
+            <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-sage/20 text-sage border border-sage/40">
+              <CheckCircle2 className="size-7" />
             </div>
-            <span className="inline-block rounded-full bg-obsidian-card px-4 py-1 font-mono text-xs font-semibold text-gold border border-obsidian-border">
+
+            <span className="inline-block rounded-full border border-gold/40 bg-gold/10 px-4 py-1 font-mono text-xs font-semibold text-gold">
               CÓDIGO DE SOLICITUD: {submittedRefCode}
             </span>
-            <h2 className="mt-3 font-display text-3xl font-semibold text-ivory sm:text-4xl">
+
+            <h2 className="mt-4 font-display text-3xl font-semibold text-ivory sm:text-4xl">
               Hemos registrado tu solicitud de cotización
             </h2>
+
             <p className="mt-3 text-sm leading-relaxed text-ivory-muted">
-              Importante: <strong>Esta solicitud no equivale a una reserva bloqueada automáticamente.</strong> Nuestro equipo de eventos ya recibió los detalles en el panel de {restaurantName} y verificará la disponibilidad del salón para el <strong>{tentativeDate}</strong> ({guestCount} invitados).
+              Importante:{" "}
+              <strong className="text-ivory">
+                Esta solicitud no equivale a una reserva bloqueada automáticamente.
+              </strong>{" "}
+              Nuestro equipo de eventos ya recibió los detalles en el panel de{" "}
+              {restaurantName} y verificará la disponibilidad del salón para el{" "}
+              <span className="font-mono text-ivory">{tentativeDate}</span> (
+              {guestCount} invitados).
             </p>
 
             <div className="mt-6 rounded-2xl border border-obsidian-border bg-obsidian-card p-5 text-left text-xs text-ivory-muted">
-              <p className="font-semibold text-ivory mb-2">
+              <p className="font-semibold text-ivory">
                 Resumen registrado en el sistema:
               </p>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <p>• Referencia: <span className="font-mono text-gold">{submittedRefCode}</span></p>
-                <p>• Evento: {eventType}</p>
+              <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                <p>
+                  • Referencia:{" "}
+                  <span className="font-mono text-gold">
+                    {submittedRefCode}
+                  </span>
+                </p>
+                <p>• Celebración: {effectiveEventType}</p>
                 <p>• Fecha tentativa: {tentativeDate}</p>
                 <p>• Aforo estimado: {guestCount} invitados</p>
                 <p>• Espacio: {selectedSpace?.name ?? "Por definir"}</p>
-                <p>• Paquete: {selectedPackage?.name ?? "Personalizado"}</p>
+                <p>• Paquete: {selectedPackage?.name ?? "A medida"}</p>
               </div>
             </div>
 
-            <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <a
                 href={whatsappSummaryUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-ember px-7 py-3 text-sm font-semibold text-ivory transition hover:bg-ember-hover sm:w-auto"
+                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-ember px-7 py-3 text-sm font-semibold text-ivory shadow-lg transition hover:bg-ember-hover sm:w-auto"
               >
                 <MessageCircle className="size-4" />
-                <span>Agilizar por WhatsApp con mi código {submittedRefCode}</span>
+                <span>
+                  Agilizar por WhatsApp con mi código {submittedRefCode}
+                </span>
               </a>
+
               <button
                 type="button"
                 onClick={() => setSubmittedRefCode(null)}
-                className="inline-flex min-h-12 w-full items-center justify-center rounded-full border border-obsidian-border px-6 py-3 text-sm font-medium text-ivory-muted hover:text-ivory sm:w-auto"
+                className="inline-flex min-h-12 items-center justify-center rounded-full border border-obsidian-border px-6 py-3 text-xs font-medium text-ivory-muted hover:text-ivory"
               >
                 Enviar otra consulta
               </button>
@@ -513,39 +889,40 @@ export function EventInquiryComposer({
         ) : (
           <div className="grid grid-cols-1 gap-10 lg:grid-cols-12">
             <div className="lg:col-span-5">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-ember/20 px-3 py-1 text-xs font-semibold text-ember-glow border border-ember/30">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-ember/20 px-3 py-1 text-xs font-medium text-ember-glow border border-ember/30">
                 <Sparkles className="size-3.5" />
                 Atención Directa de Hospitalidad
               </span>
+
               <h2 className="mt-3 font-display text-3xl font-semibold text-ivory sm:text-4xl">
                 Solicita una Propuesta & Disponibilidad de Fecha
               </h2>
+
               <p className="mt-3 text-sm leading-relaxed text-ivory-muted">
-                Completa los datos básicos de tu evento. Tu solicitud queda registrada con un código único en nuestro sistema para seguimiento prioritario y, al finalizar, podrás abrir conversación directa por WhatsApp con nuestra coordinadora de eventos.
+                Selecciona tu tipo de celebración, salón y paquete. Tu solicitud queda registrada con un código único (`CB-YYMM-XXXX`) para seguimiento prioritario y podrás abrir conversación directa por WhatsApp con nuestra coordinadora.
               </p>
 
-              <div className="mt-6 flex flex-col gap-4 rounded-2xl border border-obsidian-border bg-obsidian-card p-5 text-xs text-ivory-muted">
-                <div className="flex items-start gap-3">
+              <div className="mt-6 space-y-3 rounded-2xl border border-obsidian-border bg-obsidian-card p-5 text-xs text-ivory-muted">
+                <div className="flex items-start gap-2.5">
                   <Info className="mt-0.5 size-4 shrink-0 text-gold" />
-                  <div>
-                    <p className="font-semibold text-ivory">
-                      Transparencia en disponibilidad
-                    </p>
-                    <p className="mt-0.5">
-                      Enviar este formulario registra una solicitud de cotización; la reserva del salón se confirma una vez validada la disponibilidad de la fecha y abonado el anticipo acordado.
-                    </p>
-                  </div>
+                  <p>
+                    <strong className="text-ivory">
+                      Transparencia en disponibilidad:
+                    </strong>{" "}
+                    Enviar este formulario registra una solicitud de cotización;
+                    la reserva del salón se confirma una vez validada la
+                    disponibilidad de la fecha y abonado el anticipo acordado.
+                  </p>
                 </div>
-                <div className="flex items-start gap-3">
+                <div className="flex items-start gap-2.5">
                   <ShieldCheck className="mt-0.5 size-4 shrink-0 text-sage" />
-                  <div>
-                    <p className="font-semibold text-ivory">
-                      Datos protegidos (Ley 1581 de 2012)
-                    </p>
-                    <p className="mt-0.5">
-                      Tus datos se almacenan con aislamiento cifrado y solo son visibles para el equipo autorizado de {restaurantName}.
-                    </p>
-                  </div>
+                  <p>
+                    <strong className="text-ivory">
+                      Datos protegidos (Ley 1581 de 2012):
+                    </strong>{" "}
+                    Tus datos se almacenan con aislamiento cifrado Multi-Tenant y solo son
+                    visibles para el equipo autorizado de {restaurantName}.
+                  </p>
                 </div>
               </div>
             </div>
@@ -569,31 +946,62 @@ export function EventInquiryComposer({
                 />
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label
-                    htmlFor="eventType"
-                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ivory-muted"
-                  >
-                    Tipo de celebración o evento *
-                  </label>
+              {/* Pillar 1: Quick-Select Celebration Type Chips */}
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-ivory-muted">
+                  ¿Qué tipo de celebración o evento estás planeando? *
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {CELEBRATION_PRESETS.map((preset) => {
+                    const active = celebrationPreset === preset;
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setCelebrationPreset(preset)}
+                        className={`rounded-full border px-3.5 py-2 text-xs font-medium transition ${
+                          active
+                            ? "border-ember bg-ember text-ivory shadow-sm"
+                            : "border-obsidian-border bg-obsidian-card text-ivory-muted hover:border-ivory/40 hover:text-ivory"
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Keep #eventType input for accessibility, E2E compatibility & custom input */}
+                <div
+                  className={
+                    celebrationPreset === "Otro / A medida" ? "mt-2.5" : "sr-only"
+                  }
+                >
                   <input
                     id="eventType"
                     type="text"
-                    required
-                    value={eventType}
-                    onChange={(e) => setEventType(e.target.value)}
-                    placeholder="Ej. Cumpleaños 40, Junta Directiva..."
+                    value={
+                      celebrationPreset === "Otro / A medida"
+                        ? customCelebrationText
+                        : celebrationPreset
+                    }
+                    onChange={(e) => {
+                      setCelebrationPreset("Otro / A medida");
+                      setCustomCelebrationText(e.target.value);
+                    }}
+                    placeholder="Describe tu celebración (ej. Bautizo, Lanzamiento de marca, Cena de grado...)"
                     className="h-11 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3.5 text-sm text-ivory placeholder:text-ivory-muted/50 focus:border-ember focus:outline-none"
                   />
                 </div>
+              </div>
 
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                   <label
                     htmlFor="guestCount"
                     className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ivory-muted"
                   >
-                    Número estimado de invitados *
+                    Invitados estimados *
                   </label>
                   <input
                     id="guestCount"
@@ -606,9 +1014,7 @@ export function EventInquiryComposer({
                     className="tabular-price h-11 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3.5 font-mono text-sm text-ivory focus:border-ember focus:outline-none"
                   />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label
                     htmlFor="tentativeDate"
@@ -654,27 +1060,33 @@ export function EventInquiryComposer({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <div>
-                  <label
-                    htmlFor="locationSelect"
-                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ivory-muted"
-                  >
-                    Sede preferida
-                  </label>
-                  <select
-                    id="locationSelect"
-                    value={selectedLocationId}
-                    onChange={(e) => setSelectedLocationId(e.target.value)}
-                    className="h-11 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3 text-sm text-ivory focus:border-ember focus:outline-none"
-                  >
-                    {locations.map((loc) => (
-                      <option key={loc.id} value={loc.id}>
-                        {loc.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div
+                className={`grid grid-cols-1 gap-4 ${
+                  locations.length > 1 ? "sm:grid-cols-3" : "sm:grid-cols-2"
+                }`}
+              >
+                {locations.length > 1 && (
+                  <div>
+                    <label
+                      htmlFor="locationSelect"
+                      className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ivory-muted"
+                    >
+                      Sede preferida
+                    </label>
+                    <select
+                      id="locationSelect"
+                      value={selectedLocationId}
+                      onChange={(e) => setSelectedLocationId(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3 text-sm text-ivory focus:border-ember focus:outline-none"
+                    >
+                      {locations.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label
@@ -686,7 +1098,14 @@ export function EventInquiryComposer({
                   <select
                     id="spaceSelect"
                     value={selectedSpaceId}
-                    onChange={(e) => setSelectedSpaceId(e.target.value)}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setSelectedSpaceId(nextId);
+                      const found = spaces.find((s) => s.id === nextId);
+                      if (found?.location_id) {
+                        setSelectedLocationId(found.location_id);
+                      }
+                    }}
                     className="h-11 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3 text-sm text-ivory focus:border-ember focus:outline-none"
                   >
                     {spaces.map((sp) => (
@@ -707,7 +1126,10 @@ export function EventInquiryComposer({
                   <select
                     id="packageSelect"
                     value={selectedPackageId}
-                    onChange={(e) => setSelectedPackageId(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedPackageId(e.target.value);
+                      setSelectedExtras([]);
+                    }}
                     className="h-11 w-full rounded-xl border border-obsidian-border bg-obsidian-card px-3 text-sm text-ivory focus:border-ember focus:outline-none"
                   >
                     {packages.map((pk) => (
@@ -803,7 +1225,7 @@ export function EventInquiryComposer({
                 </label>
                 <textarea
                   id="specialRequests"
-                  rows={3}
+                  rows={2}
                   value={specialRequests}
                   onChange={(e) => setSpecialRequests(e.target.value)}
                   placeholder="Cuéntanos si requieres proyector, opciones vegetarianas, decoración de cumpleaños o factura corporativa..."
@@ -811,7 +1233,7 @@ export function EventInquiryComposer({
                 />
               </div>
 
-              {/* Live Referential Budget & Capacity Estimator */}
+              {/* Live Referential Budget & Interactive Optional Extras Estimator */}
               <div className="rounded-2xl border border-gold/30 bg-obsidian-card/90 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -819,8 +1241,8 @@ export function EventInquiryComposer({
                       Estimado referencial en vivo ({guestCount} invitados)
                     </span>
                     <span className="mt-0.5 block text-xs text-ivory-muted">
-                      {selectedPackage?.name ?? "Cotización personalizada"} ·{" "}
-                      {selectedSpace?.name ?? "Salón por definir"}
+                      {effectiveEventType} ·{" "}
+                      {selectedPackage?.name ?? "Cotización personalizada"}
                     </span>
                   </div>
                   <div className="text-right">
@@ -837,7 +1259,8 @@ export function EventInquiryComposer({
                       selectedPackage.base_price && (
                         <span className="tabular-price block font-mono text-[11px] text-ivory-muted">
                           {formatCurrency(
-                            Number(selectedPackage.base_price),
+                            Number(selectedPackage.base_price) +
+                              extrasPerPersonDelta,
                             currencyCode
                           )}{" "}
                           / invitado
@@ -846,10 +1269,52 @@ export function EventInquiryComposer({
                   </div>
                 </div>
 
+                {/* Plus #3: Interactive Optional Extras Toggles */}
+                {availablePackageExtras.length > 0 && (
+                  <div className="mt-3 border-t border-obsidian-border pt-3">
+                    <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-ivory-muted">
+                      Personaliza tu estimado agregando experiencias opcionales:
+                    </span>
+                    <div className="flex flex-col gap-1.5">
+                      {availablePackageExtras.map((ext) => {
+                        const checked = selectedExtras.includes(ext.name);
+                        return (
+                          <button
+                            key={ext.name}
+                            type="button"
+                            onClick={() => toggleExtra(ext.name)}
+                            className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left text-xs transition ${
+                              checked
+                                ? "border-gold bg-gold/15 text-ivory"
+                                : "border-obsidian-border bg-obsidian text-ivory-muted hover:text-ivory"
+                            }`}
+                          >
+                            <span className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                readOnly
+                                checked={checked}
+                                className="size-3.5 accent-ember pointer-events-none"
+                              />
+                              <span>{ext.name}</span>
+                            </span>
+                            <span className="tabular-price font-mono font-semibold text-gold">
+                              {ext.price}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {exceedsSpaceSeated && selectedSpace && (
                   <p className="mt-2.5 border-t border-obsidian-border pt-2 text-xs text-amber-warn">
-                    Nota de aforo: <strong>{selectedSpace.name}</strong> tiene capacidad máxima de{" "}
-                    <strong>{selectedSpace.capacity_seated} personas sentadas</strong>
+                    Nota de aforo: <strong>{selectedSpace.name}</strong> tiene
+                    capacidad máxima de{" "}
+                    <strong>
+                      {selectedSpace.capacity_seated} personas sentadas
+                    </strong>
                     {maxAllowedInSelectedSpace &&
                     maxAllowedInSelectedSpace > selectedSpace.capacity_seated
                       ? ` (hasta ${maxAllowedInSelectedSpace} en formato cóctel)`
@@ -896,6 +1361,133 @@ export function EventInquiryComposer({
           </div>
         )}
       </section>
+
+      {/* Lightbox Modal for Inspecting Multi-Image Salon Gallery */}
+      {lightboxSpace && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Galería de ${lightboxSpace.space.name}`}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-obsidian/90 p-4 backdrop-blur-sm"
+          onClick={() => setLightboxSpace(null)}
+        >
+          <div
+            className="relative w-full max-w-4xl overflow-hidden rounded-3xl border border-obsidian-border bg-obsidian-card text-ivory shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-obsidian-border px-6 py-4">
+              <div>
+                <h3 className="font-display text-2xl font-semibold text-ivory">
+                  {lightboxSpace.space.name}
+                </h3>
+                <p className="text-xs text-ivory-muted">
+                  Fotografía {lightboxSpace.index + 1} de{" "}
+                  {lightboxSpace.images.length} · Capacidad{" "}
+                  {lightboxSpace.space.min_guests} a{" "}
+                  {lightboxSpace.space.capacity_seated} sentados
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLightboxSpace(null)}
+                className="flex size-10 items-center justify-center rounded-full bg-obsidian text-ivory hover:bg-ember"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+
+            <div className="relative aspect-[16/10] w-full bg-obsidian">
+              <Image
+                src={
+                  lightboxSpace.images[lightboxSpace.index] ??
+                  lightboxSpace.images[0] ??
+                  "/demo/casa-brasa/salon-cava-cristal.jpg"
+                }
+                alt={lightboxSpace.space.name}
+                fill
+                sizes="(max-width: 1024px) 100vw, 900px"
+                className="object-cover"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setLightboxSpace((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          index:
+                            (prev.index - 1 + prev.images.length) %
+                            prev.images.length,
+                        }
+                      : null
+                  )
+                }
+                className="absolute left-4 top-1/2 -translate-y-1/2 flex size-11 items-center justify-center rounded-full bg-obsidian/80 text-ivory hover:bg-ember"
+              >
+                <ChevronLeft className="size-6" />
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setLightboxSpace((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          index: (prev.index + 1) % prev.images.length,
+                        }
+                      : null
+                  )
+                }
+                className="absolute right-4 top-1/2 -translate-y-1/2 flex size-11 items-center justify-center rounded-full bg-obsidian/80 text-ivory hover:bg-ember"
+              >
+                <ChevronRight className="size-6" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 px-6 py-4">
+              <div className="flex gap-2 overflow-x-auto">
+                {lightboxSpace.images.map((imgUrl, idx) => (
+                  <button
+                    key={imgUrl + idx}
+                    type="button"
+                    onClick={() =>
+                      setLightboxSpace((prev) =>
+                        prev ? { ...prev, index: idx } : null
+                      )
+                    }
+                    className={`relative h-14 w-24 shrink-0 overflow-hidden rounded-xl border ${
+                      lightboxSpace.index === idx
+                        ? "border-ember ring-2 ring-ember"
+                        : "border-obsidian-border opacity-60"
+                    }`}
+                  >
+                    <Image
+                      src={imgUrl}
+                      alt=""
+                      fill
+                      sizes="96px"
+                      className="object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const sp = lightboxSpace.space;
+                  setLightboxSpace(null);
+                  handleSelectSpace(sp);
+                }}
+                className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full bg-ember px-6 py-2.5 text-xs font-semibold text-ivory hover:bg-ember-hover"
+              >
+                <span>Cotizar este salón</span>
+                <ArrowRight className="size-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

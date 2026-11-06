@@ -154,6 +154,36 @@ async function runAudit() {
       path: path.join(SCREENSHOT_DIR, `01-home-${vp.name}-full.png`),
       fullPage: true,
     });
+
+    // Scroll to #sedes (LocationsShowcase) & screenshot
+    const sedesSection = page.locator("#sedes");
+    if ((await sedesSection.count()) > 0) {
+      await sedesSection.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `01b-home-${vp.name}-locations-showcase.png`),
+        fullPage: false,
+      });
+
+      // Open location modal ("Conocer sede por dentro")
+      const openLocModalBtn = sedesSection
+        .locator("button", { hasText: "Conocer sede por dentro" })
+        .first();
+      if ((await openLocModalBtn.count()) > 0) {
+        await openLocModalBtn.click();
+        await page.waitForTimeout(350);
+        await page.screenshot({
+          path: path.join(SCREENSHOT_DIR, `01c-home-${vp.name}-location-modal.png`),
+          fullPage: false,
+        });
+        await page
+          .locator('[role="dialog"] button[aria-label*="Cerrar"]')
+          .first()
+          .evaluate((el) => el.click());
+        await page.waitForTimeout(250);
+      }
+    }
+
     report.routeAudits.push(
       await collectPageMetrics(page, "/casa-brasa", vp.name)
     );
@@ -219,7 +249,7 @@ async function runAudit() {
     });
 
     // Scroll to compact_list section
-    const compactSection = page.locator("text=Selección en Formato de Carta Clásica").first();
+    const compactSection = page.locator("text=Selección de Cava & Guarniciones con Referencia Visual").first();
     if ((await compactSection.count()) > 0) {
       await compactSection.scrollIntoViewIfNeeded();
       await page.evaluate(() => window.scrollBy(0, -140));
@@ -256,15 +286,15 @@ async function runAudit() {
     await highlightsBtn.click(); // reset
     await page.waitForTimeout(200);
 
-    // Open product detail modal with variants (specifically "Ribeye Cowboy 700g" if present, else first with options)
-    const cowboyCard = page
-      .locator("article", { hasText: "Ribeye Cowboy" })
+    // Open product detail modal with variants (specifically "Ribeye Ojo de Bife" if present, else first with options)
+    const ribeyeCard = page
+      .locator("article", { hasText: "Ribeye Ojo de Bife" })
       .first();
     const productWithOptions =
-      (await cowboyCard.count()) > 0
-        ? cowboyCard
+      (await ribeyeCard.count()) > 0
+        ? ribeyeCard
         : page
-            .locator("article", { hasText: "Ver términos y guarniciones" })
+            .locator("article", { hasText: "Términos y guarniciones" })
             .first();
     await productWithOptions.scrollIntoViewIfNeeded();
     await page.waitForTimeout(200);
@@ -337,12 +367,39 @@ async function runAudit() {
       fullPage: false,
     });
 
-    // Close modal
-    await dialog
-      .locator('button[aria-label*="Cerrar"]')
-      .first()
-      .evaluate((el) => el.click());
-    await page.waitForTimeout(300);
+    // Click "Agregar a mi mesa" inside modal (which also closes modal)
+    const addShortlistModalBtn = dialog
+      .locator("button", { hasText: "Agregar a mi mesa" })
+      .first();
+    if ((await addShortlistModalBtn.count()) > 0) {
+      await addShortlistModalBtn.evaluate((el) => el.click());
+      await page.waitForTimeout(350);
+    } else {
+      await dialog
+        .locator('button[aria-label*="Cerrar"]')
+        .first()
+        .evaluate((el) => el.click());
+      await page.waitForTimeout(300);
+    }
+
+    // Open the Table Shortlist ("Mi Selección en Mesa · Mostrar al Mesero") drawer
+    const openShortlistBarBtn = page
+      .locator("button", { hasText: "Mi Selección en Mesa" })
+      .first();
+    if ((await openShortlistBarBtn.count()) > 0) {
+      await openShortlistBarBtn.click();
+      await page.waitForTimeout(350);
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `06c-menu-${vp.name}-shortlist-drawer.png`),
+        fullPage: false,
+      });
+      // Close shortlist drawer
+      await page
+        .locator('[role="dialog"] button[aria-label*="Cerrar"]')
+        .first()
+        .evaluate((el) => el.click());
+      await page.waitForTimeout(250);
+    }
 
     // 3. Audit "/casa-brasa/eventos"
     console.log(`[${vp.name}] Auditing /casa-brasa/eventos...`);
