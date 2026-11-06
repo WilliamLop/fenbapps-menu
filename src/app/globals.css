@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+:root {
+  --font-cormorant: "Cormorant Garamond", Georgia, Cambria, serif;
+  --font-jakarta: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-jetbrains: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@theme {
+  --font-display: var(--font-cormorant);
+  --font-sans: var(--font-jakarta);
+  --font-mono: var(--font-jetbrains);
+
+  /* Editorial Public Surface Tokens (OKLCH) */
+  --color-canvas: oklch(97.5% 0.008 75);
+  --color-canvas-elevated: oklch(99.2% 0.004 75);
+  --color-canvas-muted: oklch(94.2% 0.012 72);
+
+  /* Obsidian Night Surface Tokens (Hero & Event Salons) */
+  --color-obsidian: oklch(15.5% 0.012 45);
+  --color-obsidian-card: oklch(20.5% 0.014 45);
+  --color-obsidian-border: oklch(28.5% 0.016 45);
+
+  /* Editorial Ink & Ember Accents */
+  --color-ink: oklch(18% 0.015 45);
+  --color-ink-muted: oklch(43% 0.015 50);
+  --color-ivory: oklch(96.5% 0.008 75);
+  --color-ivory-muted: oklch(76% 0.012 65);
+
+  --color-ember: oklch(53% 0.165 38);
+  --color-ember-hover: oklch(47% 0.165 38);
+  --color-ember-glow: oklch(65% 0.175 42);
+  --color-gold: oklch(72% 0.11 78);
+  --color-hairline: oklch(88.5% 0.012 70);
+
+  /* Semantic Status Colors */
+  --color-sage: oklch(50% 0.13 155);
+  --color-amber-warn: oklch(60% 0.15 65);
+  --color-crimson: oklch(52% 0.19 28);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+}
+
+.tabular-price {
+  font-variant-numeric: tabular-nums;
+}
