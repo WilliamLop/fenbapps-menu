@@ -7,15 +7,28 @@ import {
   ExternalLink,
   QrCode,
   Lock,
+  Layers,
+  Crown,
 } from "lucide-react";
-import { getRestaurantBySlug } from "@/modules/tenant/queries";
+import {
+  getRestaurantBySlug,
+  getRequestEffectiveCapabilities,
+  resolveEffectiveLocations,
+} from "@/modules/tenant/queries";
 import { getOperationalConsoleSnapshot } from "@/modules/admin/queries";
 import { createSupabaseAuthenticatedServerClient } from "@/lib/supabase/server";
+import { PLAN_TIERS_META, DESIGN_TIERS_META } from "@/lib/saas-entitlements";
 import { BrandIcon } from "@/components/public/brand-icon";
+import { LivePlanSimulator } from "@/components/public/live-plan-simulator";
 import { InteractiveDashboardConsole } from "@/components/admin/interactive-dashboard-console";
 
 interface DashboardPageProps {
   params: Promise<{ restaurantSlug: string }>;
+  searchParams: Promise<{
+    sede?: string;
+    plan?: string;
+    tab?: string;
+  }>;
 }
 
 export async function generateMetadata({
@@ -28,17 +41,21 @@ export async function generateMetadata({
   }
   return {
     title: `Consola Operativa · ${data.restaurant.name}`,
-    description: `Panel operativo Multi-Tenant, control de carta en vivo, CRM de eventos y generador QR para ${data.restaurant.name}.`,
+    description: `Panel operativo Multi-Tenant y Multi-Ciudad, control de carta en vivo, domicilios 0% comisión, CRM de eventos y generador QR para ${data.restaurant.name}.`,
   };
 }
 
 export default async function RestaurantDashboardPage({
   params,
+  searchParams,
 }: DashboardPageProps) {
-  const { restaurantSlug } = await params;
-  const [data, snapshot, supabase] = await Promise.all([
+  const [{ restaurantSlug }, resolvedSearch] = await Promise.all([
+    params,
+    searchParams,
+  ]);
+
+  const [data, supabase] = await Promise.all([
     getRestaurantBySlug(restaurantSlug),
-    getOperationalConsoleSnapshot(restaurantSlug),
     createSupabaseAuthenticatedServerClient(),
   ]);
 
@@ -46,9 +63,42 @@ export default async function RestaurantDashboardPage({
     notFound();
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const caps = await getRequestEffectiveCapabilities(data, resolvedSearch.plan);
+  const effectiveLocations = resolveEffectiveLocations(data, caps);
+
+  const requestedLocation = resolvedSearch.sede
+    ? effectiveLocations.find(
+        (loc) =>
+          loc.slug === resolvedSearch.sede || loc.id === resolvedSearch.sede
+      ) ?? null
+    : null;
+
+  // If multi-location is disabled on a multi-branch tenant (e.g. simulating Basic),
+  // scope the snapshot to the primary active house so branches never mix.
+  const implicitSingleLocation =
+    !caps.multiLocationEnabled && data.allLocations.length > 1
+      ? effectiveLocations[0] ?? null
+      : null;
+
+  const snapshotLocation = requestedLocation ?? implicitSingleLocation;
+
+  const [snapshot, authResult] = await Promise.all([
+    getOperationalConsoleSnapshot(restaurantSlug, snapshotLocation?.id ?? null),
+    supabase.auth.getUser(),
+  ]);
+
+  const user = authResult.data.user;
+
+  const scopedEventSpaces = snapshotLocation
+    ? data.eventSpaces.filter(
+        (space) =>
+          !space.location_id || space.location_id === snapshotLocation.id
+      )
+    : data.eventSpaces;
+
+  const uniqueCities = Array.from(
+    new Set(effectiveLocations.map((l) => l.city).filter(Boolean))
+  );
 
   const fallbackProducts = data.categories.flatMap((cat) =>
     cat.products.map((p) => ({
@@ -72,25 +122,50 @@ export default async function RestaurantDashboardPage({
     }))
   );
 
+  const planQuerySuffix =
+    caps.isSimulated && caps.simPreset !== "real"
+      ? `?plan=${encodeURIComponent(caps.simPreset)}`
+      : "";
+
+  const menuLinkHref = requestedLocation
+    ? `/${data.restaurant.slug}/menu?sede=${encodeURIComponent(
+        requestedLocation.slug
+      )}${
+        caps.isSimulated && caps.simPreset !== "real"
+          ? `&plan=${encodeURIComponent(caps.simPreset)}`
+          : ""
+      }`
+    : `/${data.restaurant.slug}/menu${planQuerySuffix}`;
+
+  const eventsLinkHref = requestedLocation
+    ? `/${data.restaurant.slug}/eventos?sede=${encodeURIComponent(
+        requestedLocation.slug
+      )}${
+        caps.isSimulated && caps.simPreset !== "real"
+          ? `&plan=${encodeURIComponent(caps.simPreset)}`
+          : ""
+      }`
+    : `/${data.restaurant.slug}/eventos${planQuerySuffix}`;
+
   return (
     <div
       data-theme={data.theme.palette}
       className="min-h-screen bg-canvas text-ink"
     >
-      {/* Top Scenario & Demo Bar */}
+      {/* Top Scenario & SaaS Control Bar */}
       <div className="border-b border-obsidian-border bg-obsidian px-4 py-2 text-xs text-ivory">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full border border-obsidian-border bg-obsidian-card px-2.5 py-0.5 font-semibold text-gold">
               Centro de Mando &quot;Mise en Place&quot;
             </span>
-            <span className="hidden text-ivory-muted sm:inline">
-              Alterna entre el escenario Multi-Sede (2 sedes) y Sede Única (1
-              establecimiento):
+            <span className="hidden text-ivory-muted lg:inline">
+              Alterna entre cadena Multi-Ciudad (Bogotá &amp; Medellín), Sede
+              Única o Control Comercial SaaS:
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Link
               href="/dashboard/casa-brasa"
               className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
@@ -99,7 +174,7 @@ export default async function RestaurantDashboardPage({
                   : "border border-obsidian-border bg-obsidian-card text-ivory-muted hover:text-ivory"
               }`}
             >
-              Casa Brasa (2 Sedes)
+              Casa Brasa (2 Ciudades · 3 Sedes)
             </Link>
             <Link
               href="/dashboard/botanica-brunch"
@@ -110,6 +185,13 @@ export default async function RestaurantDashboardPage({
               }`}
             >
               Botánica (1 Sede)
+            </Link>
+            <Link
+              href="/super-admin"
+              className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 bg-obsidian-card px-3 py-1 text-xs font-semibold text-gold transition hover:border-gold hover:bg-obsidian"
+            >
+              <Layers className="size-3.5" />
+              <span>Super-Admin SaaS</span>
             </Link>
           </div>
         </div>
@@ -128,13 +210,38 @@ export default async function RestaurantDashboardPage({
                   {data.restaurant.name} · Consola Operativa
                 </h1>
                 <span className="rounded-full border border-sage/30 bg-sage/12 px-2.5 py-0.5 text-xs font-semibold text-sage">
-                  {data.locations.length === 1
+                  {effectiveLocations.length === 1
                     ? "Casa Única"
-                    : `${data.locations.length} Sedes Activas`}
+                    : `${effectiveLocations.length} Sedes · ${uniqueCities.length} ${
+                        uniqueCities.length === 1 ? "Ciudad" : "Ciudades"
+                      }`}
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
+                    caps.isVitrineOnly || caps.isSuspended
+                      ? "border-crimson/35 bg-crimson/10 text-crimson"
+                      : "border-ember/30 bg-surface-accent text-ember"
+                  }`}
+                >
+                  <Crown className="size-3" />
+                  <span>
+                    {caps.isVitrineOnly
+                      ? "Modo Vitrina Estática"
+                      : caps.isSuspended
+                        ? "Suscripción Suspendida"
+                        : `${PLAN_TIERS_META[caps.planTier].shortLabel} · ${
+                            DESIGN_TIERS_META[caps.designTier].shortLabel
+                          }`}
+                    {caps.isSimulated ? " (Simulación)" : ""}
+                  </span>
                 </span>
               </div>
               <p className="font-mono text-xs text-ink-muted">
-                Tenant: /{data.restaurant.slug} ·{" "}
+                Tenant: /{data.restaurant.slug}
+                {requestedLocation
+                  ? ` · Sede aislada: ${requestedLocation.city} (${requestedLocation.name})`
+                  : ""}{" "}
+                ·{" "}
                 {user
                   ? `Sesión: ${user.email}`
                   : "Modo Interactivo Demo (PostgreSQL RPC)"}
@@ -143,18 +250,18 @@ export default async function RestaurantDashboardPage({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {data.enabledModules.site && (
+            {caps.siteEnabled && (
               <Link
-                href={`/${data.restaurant.slug}`}
+                href={`/${data.restaurant.slug}${planQuerySuffix}`}
                 className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-border-strong bg-canvas-elevated px-3.5 py-2 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
               >
                 <span>Sitio Web</span>
                 <ExternalLink className="size-3.5" />
               </Link>
             )}
-            {data.enabledModules.menu && (
+            {caps.menuVitrineEnabled && (
               <Link
-                href={`/${data.restaurant.slug}/menu`}
+                href={menuLinkHref}
                 className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-border-strong bg-canvas-elevated px-3.5 py-2 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
               >
                 <QrCode className="size-3.5 text-ember" />
@@ -162,13 +269,13 @@ export default async function RestaurantDashboardPage({
                 <ExternalLink className="size-3.5" />
               </Link>
             )}
-            {data.enabledModules.events && (
+            {caps.eventsEnabled && (
               <Link
-                href={`/${data.restaurant.slug}/eventos`}
+                href={eventsLinkHref}
                 className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory shadow-2xs transition hover:bg-ember-hover"
               >
                 <CalendarCheck className="size-3.5" />
-                <span>Eventos & Salones</span>
+                <span>Eventos &amp; Salones</span>
                 <ExternalLink className="size-3.5" />
               </Link>
             )}
@@ -178,23 +285,24 @@ export default async function RestaurantDashboardPage({
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
         {/* Security & Interactive Mode Banner */}
-        <div className="mb-8 rounded-3xl border border-hairline bg-surface-accent/65 p-5 text-ink shadow-2xs">
+        <div className="mb-6 rounded-3xl border border-hairline bg-surface-accent/65 p-5 text-ink shadow-2xs">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
             <div className="flex items-start gap-3.5">
               <ShieldCheck className="mt-0.5 size-6 shrink-0 text-sage" />
               <div>
                 <h2 className="text-sm font-semibold text-ink">
-                  Consola Operativa en Tiempo Real · Seguridad Multi-Tenant RLS
+                  Consola Operativa Aislada por Ciudad/Sede · Seguridad
+                  Multi-Tenant RLS
                 </h2>
                 <p className="mt-1 text-xs leading-relaxed text-ink-muted">
-                  Prueba agotando cualquier plato en 1 clic, cambiando su precio,
-                  actualizando el estado de una solicitud de evento o
-                  descargando los códigos QR ISO/IEC 18004 escaneables. Todos los
-                  cambios se persisten en PostgreSQL con auditoría en{" "}
+                  Cada sede puede operar su propio stock, precios regionales,
+                  bandeja de domicilios y solicitudes de eventos sin mezclar
+                  ciudades ni cajas. Todos los cambios se persisten en
+                  PostgreSQL con auditoría en{" "}
                   <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs font-semibold text-ember">
                     public.audit_logs
                   </code>{" "}
-                  mientras las tablas mantienen{" "}
+                  bajo{" "}
                   <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs font-semibold text-ember">
                     FORCE ROW LEVEL SECURITY
                   </code>
@@ -211,22 +319,36 @@ export default async function RestaurantDashboardPage({
         </div>
 
         <InteractiveDashboardConsole
+          key={`${data.restaurant.slug}:${requestedLocation?.id ?? "global"}:${caps.simPreset}:${caps.planTier}:${caps.subscriptionStatus}`}
           restaurantSlug={data.restaurant.slug}
           restaurantName={data.restaurant.name}
           currencyCode={data.restaurant.currency_code}
-          enabledModules={data.enabledModules}
+          capabilities={caps}
+          selectedLocation={requestedLocation}
+          initialTab={resolvedSearch.tab}
           deliveryEnabled={
-            data.delivery.enabled || data.delivery.pickupEnabled
+            caps.directOrdersEnabled &&
+            (data.delivery.enabled || data.delivery.pickupEnabled)
           }
           initialProducts={snapshot?.products ?? fallbackProducts}
           initialInquiries={snapshot?.inquiries ?? []}
           initialDirectOrders={snapshot?.directOrders ?? []}
           initialAuditLogs={snapshot?.auditLogs ?? []}
-          locations={data.locations}
-          eventSpaces={data.eventSpaces}
+          locations={effectiveLocations}
+          eventSpaces={scopedEventSpaces}
           eventPackages={data.eventPackages}
         />
       </main>
+
+      <LivePlanSimulator
+        restaurantSlug={data.restaurant.slug}
+        restaurantName={data.restaurant.name}
+        isDemo={data.restaurant.is_demo}
+        activeSimPreset={caps.simPreset}
+        realPlanTier={data.entitlements.planTier}
+        realDesignTier={data.entitlements.designTier}
+        realSubscriptionStatus={data.entitlements.subscriptionStatus}
+      />
     </div>
   );
 }

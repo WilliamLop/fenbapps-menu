@@ -30,6 +30,10 @@ interface LocationsShowcaseProps {
   restaurantSlug: string;
   locations: LocationRow[];
   eventSpaces: EventSpaceRow[];
+  enabledModules?: {
+    menu: boolean;
+    events: boolean;
+  };
 }
 
 function parseGallery(rawGallery: unknown, fallback: string | null): string[] {
@@ -58,7 +62,9 @@ export function LocationsShowcase({
   restaurantSlug,
   locations,
   eventSpaces,
+  enabledModules = { menu: true, events: true },
 }: LocationsShowcaseProps) {
+  const [selectedCity, setSelectedCity] = useState<string>("all");
   const [activeSlideByLoc, setActiveSlideByLoc] = useState<
     Record<string, number>
   >({});
@@ -70,10 +76,20 @@ export function LocationsShowcase({
 
   if (locations.length === 0) return null;
 
-  const isSingleLocation = locations.length === 1;
+  const cities = Array.from(
+    new Set(locations.map((l) => (l.city || "Bogotá").trim()))
+  );
+  const isMultiCity = cities.length > 1;
+
+  const visibleLocations =
+    !isMultiCity || selectedCity === "all"
+      ? locations
+      : locations.filter((l) => (l.city || "Bogotá").trim() === selectedCity);
+
+  const isSingleLocation = visibleLocations.length === 1;
   const gridColsClass = isSingleLocation
     ? "grid-cols-1"
-    : locations.length === 2
+    : visibleLocations.length === 2
       ? "grid-cols-1 lg:grid-cols-2"
       : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3";
 
@@ -82,28 +98,69 @@ export function LocationsShowcase({
       id="sedes"
       className="scroll-mt-36 lg:scroll-mt-24 mx-auto max-w-6xl px-4 py-16 sm:px-6"
     >
-      <div className="mb-10 flex flex-col justify-between gap-4 border-b border-hairline pb-5 lg:flex-row lg:items-end">
+      <div className="mb-8 flex flex-col justify-between gap-4 border-b border-hairline pb-5 lg:flex-row lg:items-end">
         <div className="max-w-2xl">
           <span className="text-xs font-semibold uppercase tracking-[0.16em] text-ember">
-            {isSingleLocation
+            {locations.length === 1
               ? "El Establecimiento & Contacto Directo"
+              : isMultiCity
+              ? `Presencia en ${cities.length} Ciudades · ${locations.length} Sedes`
               : "Arquitectura, Sedes & Diferenciales"}
           </span>
           <h2 className="mt-1 font-display text-3xl font-semibold text-ink sm:text-4xl">
-            {isSingleLocation
+            {locations.length === 1
               ? "Nuestra Casa, Espacios y Horarios de Atención"
               : "Nuestras Sedes: Conoce Cada Espacio y su Personalidad"}
           </h2>
         </div>
         <p className="max-w-md text-sm leading-relaxed text-ink-muted">
-          {isSingleLocation
+          {locations.length === 1
             ? `Recorre en imágenes cada ambiente de ${restaurantName}, revisa nuestros horarios de servicio y escríbenos directo sin intermediarios.`
-            : `Cada sede de ${restaurantName} cuenta con arquitectura propia, salones para grupos y especialidades exclusivas. Explora sus galerías y horarios.`}
+            : `Cada sede de ${restaurantName} cuenta con arquitectura propia, logística independiente y atención directa sin intermediarios.`}
         </p>
       </div>
 
+      {isMultiCity && (
+        <div className="mb-8 flex flex-wrap items-center gap-2 rounded-2xl border border-hairline bg-canvas-elevated p-3 sm:px-5">
+          <span className="mr-1 inline-flex items-center gap-1.5 text-xs font-semibold text-ink">
+            <MapPin className="size-4 text-ember" />
+            <span>Filtrar por ciudad:</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setSelectedCity("all")}
+            className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+              selectedCity === "all"
+                ? "bg-ink text-ivory shadow-2xs"
+                : "bg-canvas-muted text-ink-muted hover:text-ink"
+            }`}
+          >
+            Todas las ciudades ({locations.length})
+          </button>
+          {cities.map((city) => {
+            const count = locations.filter(
+              (l) => (l.city || "Bogotá").trim() === city
+            ).length;
+            return (
+              <button
+                key={city}
+                type="button"
+                onClick={() => setSelectedCity(city)}
+                className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+                  selectedCity === city
+                    ? "bg-ember text-ivory shadow-2xs"
+                    : "bg-canvas-muted text-ink-muted hover:text-ink"
+                }`}
+              >
+                {city} ({count})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className={`grid gap-8 ${gridColsClass}`}>
-        {locations.map((loc) => {
+        {visibleLocations.map((loc) => {
           const hours = Array.isArray(loc.opening_hours)
             ? (loc.opening_hours as unknown as OpeningHourSlot[])
             : [];
@@ -254,7 +311,7 @@ export function LocationsShowcase({
                           </div>
                         )}
 
-                      {spacesInLoc.length > 0 && (
+                      {enabledModules.events && spacesInLoc.length > 0 && (
                         <div>
                           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-muted">
                             Espacios privados para eventos ({spacesInLoc.length})
@@ -463,7 +520,7 @@ export function LocationsShowcase({
                       </div>
                     )}
 
-                  {spacesInLoc.length > 0 && (
+                  {enabledModules.events && spacesInLoc.length > 0 && (
                     <div className="mt-5">
                       <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-muted">
                         Salones privados en esta sede ({spacesInLoc.length})
@@ -680,38 +737,42 @@ export function LocationsShowcase({
 
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline pt-4">
                   <div className="flex flex-wrap gap-2.5">
-                    <Link
-                      href={
-                        isSingleLocation
-                          ? `/${restaurantSlug}/menu`
-                          : `/${restaurantSlug}/menu?sede=${selectedLocModal.loc.slug}`
-                      }
-                      onClick={() => setSelectedLocModal(null)}
-                      className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-ember px-5 py-2.5 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
-                    >
-                      <UtensilsCrossed className="size-3.5" />
-                      <span>
-                        {isSingleLocation
-                          ? "Explorar Carta Digital"
-                          : `Ver Carta de ${selectedLocModal.loc.name}`}
-                      </span>
-                    </Link>
-                    <Link
-                      href={
-                        isSingleLocation
-                          ? `/${restaurantSlug}/eventos`
-                          : `/${restaurantSlug}/eventos?sede=${selectedLocModal.loc.slug}`
-                      }
-                      onClick={() => setSelectedLocModal(null)}
-                      className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border-strong bg-canvas px-5 py-2.5 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
-                    >
-                      <Sparkles className="size-3.5 text-ember" />
-                      <span>
-                        {isSingleLocation
-                          ? "Cotizar Salón Privado"
-                          : `Cotizar Evento en ${selectedLocModal.loc.name}`}
-                      </span>
-                    </Link>
+                    {enabledModules.menu && (
+                      <Link
+                        href={
+                          locations.length === 1
+                            ? `/${restaurantSlug}/menu`
+                            : `/${restaurantSlug}/menu?sede=${selectedLocModal.loc.slug}`
+                        }
+                        onClick={() => setSelectedLocModal(null)}
+                        className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-ember px-5 py-2.5 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
+                      >
+                        <UtensilsCrossed className="size-3.5" />
+                        <span>
+                          {locations.length === 1
+                            ? "Explorar Carta Digital"
+                            : `Ver Carta de ${selectedLocModal.loc.name}`}
+                        </span>
+                      </Link>
+                    )}
+                    {enabledModules.events && (
+                      <Link
+                        href={
+                          locations.length === 1
+                            ? `/${restaurantSlug}/eventos`
+                            : `/${restaurantSlug}/eventos?sede=${selectedLocModal.loc.slug}`
+                        }
+                        onClick={() => setSelectedLocModal(null)}
+                        className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border-strong bg-canvas px-5 py-2.5 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
+                      >
+                        <Sparkles className="size-3.5 text-ember" />
+                        <span>
+                          {locations.length === 1
+                            ? "Cotizar Salón Privado"
+                            : `Cotizar Evento en ${selectedLocModal.loc.name}`}
+                        </span>
+                      </Link>
+                    )}
                   </div>
 
                   {selectedLocModal.loc.google_maps_url && (

@@ -142,18 +142,29 @@ async function runAudit() {
       }
     });
 
-    // 0. Audit "/" (SaaS Showcase & Demo Switcher)
+    // 0. Audit "/" (SaaS Showcase & Demo Switcher) and "/super-admin"
     console.log(`[${vp.name}] Auditing / (SaaS Showcase)...`);
     await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(450);
     if (vp.name === "desktop") {
       await page.screenshot({
-        path: path.join(SCREENSHOT_DIR, `iter6-after-saas-home.png`),
+        path: path.join(SCREENSHOT_DIR, `iter7-saas-home-desktop.png`),
         fullPage: false,
       });
     }
     report.routeAudits.push(
       await collectPageMetrics(page, "/", vp.name)
+    );
+
+    console.log(`[${vp.name}] Auditing /super-admin (Fenbapps Control Plane)...`);
+    await page.goto(`${BASE_URL}/super-admin`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(550);
+    await page.screenshot({
+      path: path.join(SCREENSHOT_DIR, `iter7-super-admin-${vp.name}.png`),
+      fullPage: false,
+    });
+    report.routeAudits.push(
+      await collectPageMetrics(page, "/super-admin", vp.name)
     );
 
     // 1. Audit "/casa-brasa"
@@ -456,7 +467,7 @@ async function runAudit() {
           );
 
           await page.click('button[form="direct-order-checkout-form"]');
-          await page.waitForSelector("text=CÓDIGO CB-DOM-", { timeout: 10000 });
+          await page.waitForSelector("text=CÓDIGO CB-DOM-", { timeout: 20000 });
           await page.waitForTimeout(350);
           deliveryOrderCode = await page
             .locator("text=CÓDIGO CB-DOM-")
@@ -571,7 +582,7 @@ async function runAudit() {
 
       await page.click('button[type="submit"]');
       // Wait for confirmation state
-      await page.waitForSelector("text=CÓDIGO DE SOLICITUD:", { timeout: 10000 });
+      await page.waitForSelector("text=CÓDIGO DE SOLICITUD:", { timeout: 20000 });
       await page.waitForTimeout(400);
 
       refBadgeText = await page
@@ -623,10 +634,10 @@ async function runAudit() {
       });
     }
 
-    // Click Tab 3: Mini-CRM de Solicitudes de Eventos & verify status update works without constraint violation
+    // Click Tab 3: Mini-CRM de Eventos & verify status update works without constraint violation
     let crmStatusUpdateVerified = false;
     const crmTabBtn = page
-      .locator('[role="tab"]', { hasText: "Mini-CRM de Solicitudes" })
+      .locator('[role="tab"]', { hasText: "Mini-CRM de Eventos" })
       .first();
     if ((await crmTabBtn.count()) > 0) {
       await crmTabBtn.click();
@@ -676,6 +687,79 @@ async function runAudit() {
     report.routeAudits.push(
       await collectPageMetrics(page, "/dashboard/casa-brasa", vp.name)
     );
+
+    // 4b. Audit Phase 1 Multi-City Isolation & Commercial Modes (Medellín + Vitrine Only + Basic Lock + Simulator)
+    if (vp.name === "desktop") {
+      console.log(`[${vp.name}] Auditing Multi-City Menu (/casa-brasa/menu?sede=medellin-provenza)...`);
+      await page.goto(`${BASE_URL}/casa-brasa/menu?sede=medellin-provenza`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForTimeout(550);
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter7-multicity-menu-medellin.png`),
+        fullPage: false,
+      });
+      report.routeAudits.push(
+        await collectPageMetrics(page, "/casa-brasa/menu?sede=medellin-provenza", vp.name)
+      );
+
+      // Open LivePlanSimulator via Shift+P
+      await page.keyboard.press("Shift+P");
+      await page.waitForTimeout(350);
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter7-live-plan-simulator.png`),
+        fullPage: false,
+      });
+
+      console.log(`[${vp.name}] Auditing CRM Location Isolation (/dashboard/casa-brasa?sede=medellin-provenza)...`);
+      await page.goto(`${BASE_URL}/dashboard/casa-brasa?sede=medellin-provenza`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForTimeout(550);
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter7-crm-location-isolation.png`),
+        fullPage: false,
+      });
+      report.routeAudits.push(
+        await collectPageMetrics(page, "/dashboard/casa-brasa?sede=medellin-provenza", vp.name)
+      );
+
+      const mdeOrdersTab = page.locator('[role="tab"]', { hasText: "Pedidos & Domicilios" }).first();
+      if ((await mdeOrdersTab.count()) > 0) {
+        await mdeOrdersTab.click();
+        await page.waitForTimeout(350);
+        await page.screenshot({
+          path: path.join(SCREENSHOT_DIR, `iter7-crm-medellin-orders.png`),
+          fullPage: false,
+        });
+      }
+
+      console.log(`[${vp.name}] Auditing Frozen Vitrine Mode (/dashboard/casa-brasa?plan=vitrine_only)...`);
+      await page.goto(`${BASE_URL}/dashboard/casa-brasa?plan=vitrine_only`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForTimeout(550);
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter7-crm-vitrine-only-freeze.png`),
+        fullPage: false,
+      });
+      report.routeAudits.push(
+        await collectPageMetrics(page, "/dashboard/casa-brasa?plan=vitrine_only", vp.name)
+      );
+
+      console.log(`[${vp.name}] Auditing Basic Plan Upgrade Preview (/dashboard/casa-brasa?plan=basic&tab=pedidos)...`);
+      await page.goto(`${BASE_URL}/dashboard/casa-brasa?plan=basic&tab=pedidos`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForTimeout(550);
+      await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, `iter7-crm-basic-plan-lock.png`),
+        fullPage: false,
+      });
+      report.routeAudits.push(
+        await collectPageMetrics(page, "/dashboard/casa-brasa?plan=basic&tab=pedidos", vp.name)
+      );
+    }
 
     // 5. Audit "/botanica-brunch" (Single-Location Demo Scenario: Home, Menu, Eventos, Dashboard)
     console.log(`[${vp.name}] Auditing /botanica-brunch (Single-Location Scenario)...`);

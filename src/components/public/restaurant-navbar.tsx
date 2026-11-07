@@ -66,7 +66,7 @@ export function RestaurantNavbar({
                     : "border border-obsidian-border bg-obsidian-card text-ivory-muted hover:text-ivory"
                 }`}
               >
-                <span>Casa Brasa (2 Sedes)</span>
+                <span>Casa Brasa (2 Ciudades · 3 Sedes)</span>
               </Link>
               <Link
                 href={
@@ -86,6 +86,12 @@ export function RestaurantNavbar({
               </Link>
             </div>
             <div className="flex items-center gap-2">
+              <Link
+                href="/super-admin"
+                className="hidden md:inline-flex items-center rounded-full border border-gold/35 bg-obsidian-card px-3 py-1 text-xs font-semibold text-gold transition hover:bg-gold hover:text-obsidian"
+              >
+                Super-Admin Planes
+              </Link>
               <Link
                 href="/"
                 className="hidden sm:inline-flex items-center rounded-md px-2 py-1 text-xs text-ivory-muted transition hover:text-ivory"

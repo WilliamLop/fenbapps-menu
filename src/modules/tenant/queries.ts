@@ -1,5 +1,19 @@
 import { cache } from "react";
+import { cookies } from "next/headers";
 import { createSupabasePublicServerClient } from "@/lib/supabase/server";
+import {
+  parseSimPlanPreset,
+  resolveEffectiveCapabilities,
+  SIM_PLAN_COOKIE_NAME,
+  type DesignTier,
+  type EffectiveCapabilities,
+  type FeatureFlagKey,
+  type ProductLocationRecord,
+  type RestaurantEntitlementsConfig,
+  type SaasPlanTier,
+  type SimPlanPreset,
+  type SubscriptionStatus,
+} from "@/lib/saas-entitlements";
 import type { Database } from "@/types/database.types";
 
 export type RestaurantRow = Database["public"]["Tables"]["restaurants"]["Row"];
@@ -7,6 +21,8 @@ export type LocationRow = Database["public"]["Tables"]["locations"]["Row"];
 export type MenuRow = Database["public"]["Tables"]["menus"]["Row"];
 export type CategoryRow = Database["public"]["Tables"]["categories"]["Row"];
 export type ProductRow = Database["public"]["Tables"]["products"]["Row"];
+export type ProductLocationRow =
+  Database["public"]["Tables"]["product_locations"]["Row"];
 export type ProductOptionGroupRow =
   Database["public"]["Tables"]["product_option_groups"]["Row"];
 export type ProductOptionRow =
@@ -21,6 +37,7 @@ export interface ProductOptionGroupWithItems extends ProductOptionGroupRow {
 
 export interface ProductWithDetails extends ProductRow {
   optionGroups: ProductOptionGroupWithItems[];
+  productLocations: ProductLocationRecord[];
 }
 
 export interface CategoryWithProducts extends CategoryRow {
@@ -87,9 +104,12 @@ export interface RestaurantAggregateData {
   restaurant: RestaurantRow;
   theme: RestaurantThemeConfig;
   contact: RestaurantContactConfig;
+  entitlements: RestaurantEntitlementsConfig;
   enabledModules: EnabledModulesConfig;
   delivery: RestaurantDeliveryConfig;
+  allLocations: LocationRow[];
   locations: LocationRow[];
+  cities: string[];
   menus: MenuRow[];
   categories: CategoryWithProducts[];
   featuredProducts: ProductWithDetails[];
@@ -133,76 +153,87 @@ export function resolveTenantTheme(
     combinedHint.includes("ceviche") ||
     combinedHint.includes("nikkei");
 
-  const isWineBistro =
+  const isWine =
+    combinedHint.includes("borgona") ||
     combinedHint.includes("bistro") ||
-    combinedHint.includes("cava") ||
     combinedHint.includes("trattoria");
 
-  const defaultPalette: TenantPalettePreset = isBotanical
-    ? "botanica-huerta"
-    : isCoastal
-      ? "mar-pacifico"
-      : isWineBistro
-        ? "cava-borgona"
-        : "brasa-roble";
-
-  const palette =
-    typeof rawTheme.palette === "string" &&
-    VALID_PALETTES.has(rawTheme.palette as TenantPalettePreset)
+  const rawPalette =
+    typeof rawTheme.palette === "string"
       ? (rawTheme.palette as TenantPalettePreset)
-      : defaultPalette;
+      : typeof rawTheme.theme_palette === "string"
+      ? (rawTheme.theme_palette as TenantPalettePreset)
+      : undefined;
 
-  const defaultIcon: TenantBrandIcon =
-    palette === "botanica-huerta"
+  const palette: TenantPalettePreset =
+    rawPalette && VALID_PALETTES.has(rawPalette)
+      ? rawPalette
+      : isBotanical
+      ? "botanica-huerta"
+      : isCoastal
+      ? "mar-pacifico"
+      : isWine
+      ? "cava-borgona"
+      : "brasa-roble";
+
+  const rawIcon =
+    typeof rawTheme.brandIcon === "string"
+      ? (rawTheme.brandIcon as TenantBrandIcon)
+      : typeof rawTheme.brand_icon === "string"
+      ? (rawTheme.brand_icon as TenantBrandIcon)
+      : undefined;
+
+  const brandIcon: TenantBrandIcon =
+    rawIcon && VALID_ICONS.has(rawIcon)
+      ? rawIcon
+      : palette === "botanica-huerta"
       ? "leaf"
       : palette === "mar-pacifico"
-        ? "waves"
-        : palette === "cava-borgona"
-          ? "wine"
-          : slug === "casa-brasa"
-            ? "flame"
-            : "utensils";
+      ? "waves"
+      : palette === "cava-borgona"
+      ? "wine"
+      : "flame";
 
-  const brandIcon =
-    typeof rawTheme.brandIcon === "string" &&
-    VALID_ICONS.has(rawTheme.brandIcon as TenantBrandIcon)
-      ? (rawTheme.brandIcon as TenantBrandIcon)
-      : defaultIcon;
+  const rawHeroStyle =
+    typeof rawTheme.heroStyle === "string"
+      ? rawTheme.heroStyle
+      : typeof rawTheme.hero_style === "string"
+      ? rawTheme.hero_style
+      : undefined;
 
   const heroStyle: TenantHeroStyle =
-    rawTheme.heroStyle === "sunlit-editorial" ||
-    rawTheme.heroStyle === "immersive-dark"
-      ? rawTheme.heroStyle
-      : palette === "botanica-huerta"
-        ? "sunlit-editorial"
-        : "immersive-dark";
+    rawHeroStyle === "sunlit-editorial" || rawHeroStyle === "immersive-dark"
+      ? rawHeroStyle
+      : palette === "botanica-huerta" || palette === "mar-pacifico"
+      ? "sunlit-editorial"
+      : "immersive-dark";
 
-  const searchPlaceholder =
-    typeof rawTheme.searchPlaceholder === "string" &&
-    rawTheme.searchPlaceholder.trim().length > 0
-      ? rawTheme.searchPlaceholder
-      : palette === "botanica-huerta"
-        ? "Buscar plato de la huerta, brunch o vino natural..."
-        : slug === "casa-brasa"
-          ? "Buscar corte madurado, entrada o vino..."
-          : "Buscar plato, ingrediente o bebida...";
+  const defaultSearchPlaceholder =
+    palette === "botanica-huerta"
+      ? "Buscar brunch, plato de huerta, café o vino natural..."
+      : palette === "mar-pacifico"
+      ? "Buscar ceviche, pesca del día, entrada o cóctel..."
+      : "Buscar plato, entrada, cóctel o ingrediente...";
 
-  const signatureBadgeLabel =
-    typeof rawTheme.signatureBadgeLabel === "string" &&
-    rawTheme.signatureBadgeLabel.trim().length > 0
-      ? rawTheme.signatureBadgeLabel
-      : palette === "botanica-huerta"
-        ? "Insignia de la Huerta"
-        : slug === "casa-brasa"
-          ? "Corte Insignia"
-          : "Especialidad de la Casa";
+  const defaultSignatureBadge =
+    palette === "botanica-huerta"
+      ? "Insignia de la Huerta"
+      : palette === "mar-pacifico"
+      ? "Pesca Insignia"
+      : "Especialidad de la Casa";
 
   return {
     palette,
     brandIcon,
     heroStyle,
-    searchPlaceholder,
-    signatureBadgeLabel,
+    searchPlaceholder:
+      typeof rawTheme.searchPlaceholder === "string"
+        ? rawTheme.searchPlaceholder
+        : defaultSearchPlaceholder,
+    signatureBadgeLabel:
+      typeof rawTheme.signatureBadgeLabel === "string"
+        ? rawTheme.signatureBadgeLabel
+        : defaultSignatureBadge,
     archetype,
     heroImage:
       typeof rawTheme.heroImage === "string" ? rawTheme.heroImage : undefined,
@@ -214,6 +245,65 @@ export function resolveTenantTheme(
       typeof rawTheme.serviceChargeNote === "string"
         ? rawTheme.serviceChargeNote
         : undefined,
+  };
+}
+
+function parseEntitlementsRow(
+  raw: Database["public"]["Tables"]["restaurant_entitlements"]["Row"] | null
+): RestaurantEntitlementsConfig {
+  const planTier: SaasPlanTier =
+    raw?.plan_tier === "basic" ||
+    raw?.plan_tier === "standard" ||
+    raw?.plan_tier === "full"
+      ? raw.plan_tier
+      : "full";
+
+  const designTier: DesignTier =
+    raw?.design_tier === "basic" ||
+    raw?.design_tier === "standard" ||
+    raw?.design_tier === "premium"
+      ? raw.design_tier
+      : "standard";
+
+  const subscriptionStatus: SubscriptionStatus =
+    raw?.subscription_status === "active" ||
+    raw?.subscription_status === "past_due_grace" ||
+    raw?.subscription_status === "vitrine_only" ||
+    raw?.subscription_status === "suspended"
+      ? raw.subscription_status
+      : "active";
+
+  const rawOverrides =
+    raw &&
+    typeof raw.feature_overrides === "object" &&
+    raw.feature_overrides !== null &&
+    !Array.isArray(raw.feature_overrides)
+      ? (raw.feature_overrides as Record<string, unknown>)
+      : {};
+
+  const featureOverrides: Partial<Record<FeatureFlagKey, boolean>> = {};
+  for (const key of [
+    "table_shortlist",
+    "direct_orders",
+    "promotions",
+    "events_crm",
+    "multi_location",
+    "catalog_mutations",
+  ] as FeatureFlagKey[]) {
+    if (typeof rawOverrides[key] === "boolean") {
+      featureOverrides[key] = rawOverrides[key] as boolean;
+    }
+  }
+
+  return {
+    planTier,
+    designTier,
+    subscriptionStatus,
+    maxLocations: raw?.max_locations ?? 1,
+    setupOneTimeFee: Number(raw?.setup_one_time_fee ?? 1500000),
+    monthlyBaseFee: Number(raw?.monthly_base_fee ?? 249000),
+    extraLocationFee: Number(raw?.extra_location_fee ?? 129000),
+    featureOverrides,
   };
 }
 
@@ -234,15 +324,22 @@ async function fetchRestaurantAggregateUncached(
   }
 
   const [
+    entitlementsRes,
     locationsRes,
     menusRes,
     categoriesRes,
     productsRes,
+    productLocationsRes,
     optionGroupsRes,
     optionsRes,
     eventSpacesRes,
     eventPackagesRes,
   ] = await Promise.all([
+    supabase
+      .from("restaurant_entitlements")
+      .select("*")
+      .eq("restaurant_id", restaurant.id)
+      .maybeSingle(),
     supabase
       .from("locations")
       .select("*")
@@ -268,6 +365,10 @@ async function fetchRestaurantAggregateUncached(
       .in("availability_status", ["available", "sold_out"])
       .order("sort_order", { ascending: true }),
     supabase
+      .from("product_locations")
+      .select("product_id, location_id, is_offered, availability_status, price_override")
+      .eq("restaurant_id", restaurant.id),
+    supabase
       .from("product_option_groups")
       .select("*")
       .eq("restaurant_id", restaurant.id)
@@ -291,14 +392,58 @@ async function fetchRestaurantAggregateUncached(
       .order("sort_order", { ascending: true }),
   ]);
 
-  const locations = locationsRes.data ?? [];
+  const entitlements = parseEntitlementsRow(entitlementsRes.data ?? null);
+  const allActiveLocations = locationsRes.data ?? [];
+
+  const rawModules =
+    typeof restaurant.enabled_modules === "object" &&
+    restaurant.enabled_modules !== null &&
+    !Array.isArray(restaurant.enabled_modules)
+      ? (restaurant.enabled_modules as Record<string, unknown>)
+      : {};
+
+  const baseEnabledModules: EnabledModulesConfig = {
+    menu: rawModules.menu !== false,
+    events: rawModules.events !== false,
+    site: rawModules.site !== false,
+  };
+
+  const realCapabilities = resolveEffectiveCapabilities(
+    entitlements,
+    baseEnabledModules,
+    "real"
+  );
+
+  // If Multi-Location is disabled in DB entitlements, clamp visible locations to primary/first
+  const locations = realCapabilities.multiLocationEnabled
+    ? allActiveLocations.slice(0, Math.max(1, entitlements.maxLocations))
+    : allActiveLocations.slice(0, 1);
+
+  const cities = Array.from(
+    new Set(locations.map((l) => (l.city || "Bogotá").trim()))
+  );
+
   const menus = menusRes.data ?? [];
   const rawCategories = categoriesRes.data ?? [];
   const rawProducts = productsRes.data ?? [];
+  const rawProductLocations = productLocationsRes.data ?? [];
   const rawOptionGroups = optionGroupsRes.data ?? [];
   const rawOptions = optionsRes.data ?? [];
   const eventSpaces = eventSpacesRes.data ?? [];
   const eventPackages = eventPackagesRes.data ?? [];
+
+  const prodLocsByProductId = new Map<string, ProductLocationRecord[]>();
+  for (const pl of rawProductLocations) {
+    const existing = prodLocsByProductId.get(pl.product_id) ?? [];
+    existing.push({
+      location_id: pl.location_id,
+      is_offered: pl.is_offered,
+      availability_status: pl.availability_status,
+      price_override:
+        pl.price_override != null ? Number(pl.price_override) : null,
+    });
+    prodLocsByProductId.set(pl.product_id, existing);
+  }
 
   const optionsByGroupId = new Map<string, ProductOptionRow[]>();
   for (const opt of rawOptions) {
@@ -320,6 +465,7 @@ async function fetchRestaurantAggregateUncached(
   const enrichedProducts: ProductWithDetails[] = rawProducts.map((prod) => ({
     ...prod,
     optionGroups: groupsByProductId.get(prod.id) ?? [],
+    productLocations: prodLocsByProductId.get(prod.id) ?? [],
   }));
 
   const productsByCategoryId = new Map<string, ProductWithDetails[]>();
@@ -352,13 +498,6 @@ async function fetchRestaurantAggregateUncached(
       ? (restaurant.contact_config as Record<string, unknown>)
       : {};
 
-  const rawModules =
-    typeof restaurant.enabled_modules === "object" &&
-    restaurant.enabled_modules !== null &&
-    !Array.isArray(restaurant.enabled_modules)
-      ? (restaurant.enabled_modules as Record<string, unknown>)
-      : {};
-
   const rawDelivery =
     typeof restaurant.delivery_config === "object" &&
     restaurant.delivery_config !== null &&
@@ -374,7 +513,11 @@ async function fetchRestaurantAggregateUncached(
 
   return {
     restaurant,
-    theme: resolveTenantTheme(restaurant.slug, restaurant.cuisine_type, rawTheme),
+    theme: resolveTenantTheme(
+      restaurant.slug,
+      restaurant.cuisine_type,
+      rawTheme
+    ),
     contact: {
       whatsappPrimary:
         typeof rawContact.whatsappPrimary === "string"
@@ -393,14 +536,18 @@ async function fetchRestaurantAggregateUncached(
           ? rawContact.privacyPolicyText
           : `Autorizo a ${restaurant.name} el tratamiento de mis datos personales para gestionar esta solicitud conforme a la Ley 1581 de 2012.`,
     },
+    entitlements,
     enabledModules: {
-      menu: rawModules.menu !== false,
-      events: rawModules.events !== false,
-      site: rawModules.site !== false,
+      menu: realCapabilities.menuVitrineEnabled,
+      events: realCapabilities.eventsEnabled,
+      site: realCapabilities.siteEnabled,
     },
     delivery: {
-      enabled: rawDelivery.enabled !== false,
-      pickupEnabled: rawDelivery.pickupEnabled !== false,
+      enabled:
+        realCapabilities.directOrdersEnabled && rawDelivery.enabled !== false,
+      pickupEnabled:
+        realCapabilities.directOrdersEnabled &&
+        rawDelivery.pickupEnabled !== false,
       deliveryFee:
         typeof rawDelivery.deliveryFee === "number"
           ? rawDelivery.deliveryFee
@@ -426,13 +573,28 @@ async function fetchRestaurantAggregateUncached(
           ? rawDelivery.transferInstructions
           : "Solicitar llave Bre-B / Nequi o QR bancario al confirmar por WhatsApp.",
     },
+    allLocations: allActiveLocations,
     locations,
+    cities,
     menus,
     categories,
     featuredProducts,
     eventSpaces,
     eventPackages,
   };
+}
+
+export function resolveEffectiveLocations(
+  data: RestaurantAggregateData,
+  caps: EffectiveCapabilities
+): LocationRow[] {
+  if (!caps.multiLocationEnabled) {
+    return data.allLocations.slice(0, 1);
+  }
+  if (caps.isSimulated) {
+    return data.allLocations;
+  }
+  return data.allLocations.slice(0, Math.max(1, data.entitlements.maxLocations));
 }
 
 export const getRestaurantBySlug = cache(
@@ -445,3 +607,46 @@ export const getRestaurantBySlug = cache(
     return fetchRestaurantAggregateUncached(sanitizedSlug);
   }
 );
+
+/**
+ * Resolves the effective capabilities for the current HTTP request, combining
+ * database `restaurant_entitlements` with any ephemeral presenter simulation
+ * (`?plan=` URL param or `fenbapps_sim_plan` session cookie on demo tenants).
+ */
+export async function getRequestEffectiveCapabilities(
+  data: RestaurantAggregateData,
+  urlPlanParam?: string | null
+): Promise<EffectiveCapabilities> {
+  let simPreset: SimPlanPreset = "real";
+
+  if (data.restaurant.is_demo) {
+    if (urlPlanParam) {
+      simPreset = parseSimPlanPreset(urlPlanParam);
+    } else {
+      try {
+        const cookieStore = await cookies();
+        const rawCookie = cookieStore.get(SIM_PLAN_COOKIE_NAME)?.value;
+        simPreset = parseSimPlanPreset(rawCookie);
+      } catch {
+        simPreset = "real";
+      }
+    }
+  }
+
+  const rawModules =
+    typeof data.restaurant.enabled_modules === "object" &&
+    data.restaurant.enabled_modules !== null &&
+    !Array.isArray(data.restaurant.enabled_modules)
+      ? (data.restaurant.enabled_modules as Record<string, unknown>)
+      : {};
+
+  return resolveEffectiveCapabilities(
+    data.entitlements,
+    {
+      site: rawModules.site !== false,
+      menu: rawModules.menu !== false,
+      events: rawModules.events !== false,
+    },
+    simPreset
+  );
+}

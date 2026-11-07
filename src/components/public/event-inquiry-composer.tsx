@@ -164,6 +164,9 @@ export function EventInquiryComposer({
 
   const defaultPackage = initialMatchedPackage ?? packages[0];
 
+  const [spaceCityFilter, setSpaceCityFilter] = useState<string>(
+    initialMatchedLocation?.city ? initialMatchedLocation.city.trim() : "all"
+  );
   const [spaceLocationFilter, setSpaceLocationFilter] = useState<string>(
     initialMatchedLocation && locations.length > 1
       ? initialMatchedLocation.id
@@ -222,6 +225,13 @@ export function EventInquiryComposer({
 
   const refPrefix = getRestaurantRefPrefix(restaurantSlug);
 
+  const cities = useMemo(
+    () =>
+      Array.from(new Set(locations.map((l) => (l.city || "Bogotá").trim()))),
+    [locations]
+  );
+  const isMultiCity = cities.length > 1;
+
   const locationMap = useMemo(() => {
     const map = new Map<string, LocationRow>();
     for (const loc of locations) {
@@ -231,11 +241,19 @@ export function EventInquiryComposer({
   }, [locations]);
 
   const filteredSpaces = useMemo(() => {
-    if (spaceLocationFilter === "all") return spaces;
-    return spaces.filter(
-      (sp) => !sp.location_id || sp.location_id === spaceLocationFilter
-    );
-  }, [spaces, spaceLocationFilter]);
+    return spaces.filter((sp) => {
+      if (spaceLocationFilter !== "all") {
+        return !sp.location_id || sp.location_id === spaceLocationFilter;
+      }
+      if (isMultiCity && spaceCityFilter !== "all" && sp.location_id) {
+        const loc = locationMap.get(sp.location_id);
+        return (loc?.city || "Bogotá").trim() === spaceCityFilter;
+      }
+      return true;
+    });
+  }, [spaces, spaceLocationFilter, isMultiCity, spaceCityFilter, locationMap]);
+
+  const selectedLocationObj = locationMap.get(selectedLocationId) ?? null;
 
   const selectedPackage = packages.find((p) => p.id === selectedPackageId);
   const selectedSpace = spaces.find((s) => s.id === selectedSpaceId);
@@ -400,17 +418,22 @@ export function EventInquiryComposer({
     });
   }
 
+  const targetEventWhatsAppPhone =
+    selectedLocationObj?.whatsapp_phone ||
+    selectedSpaceLocation?.whatsapp_phone ||
+    whatsappPhone;
+
   const whatsappSummaryUrl =
-    submittedRefCode && whatsappPhone
+    submittedRefCode && targetEventWhatsAppPhone
       ? buildWhatsAppUrl(
-          whatsappPhone,
+          targetEventWhatsAppPhone,
           `Hola equipo de ${restaurantName}, acabo de registrar la solicitud de evento *${submittedRefCode}*:\n` +
             `• Celebración: ${effectiveEventType}\n` +
             `• Fecha tentativa: ${tentativeDate} (${TIME_SLOT_LABELS[preferredTimeSlot]})\n` +
             `• Invitados estimados: ${guestCount} personas\n` +
             `• Salón: ${selectedSpace?.name ?? "Por definir"}${
               selectedSpaceLocation && locations.length > 1
-                ? ` (${selectedSpaceLocation.name})`
+                ? ` (${selectedSpaceLocation.name} · ${selectedSpaceLocation.city})`
                 : ""
             }\n` +
             `• Paquete: ${selectedPackage?.name ?? "Cotización a medida"}\n` +
@@ -455,44 +478,117 @@ export function EventInquiryComposer({
             </p>
           </div>
 
-          {/* Multi-Location Filter (Hidden automatically on single-location restaurants) */}
+          {/* Multi-City & Multi-Location Filter (Hidden automatically on single-location restaurants) */}
           {locations.length > 1 && spaces.length > 1 && (
-            <div className="mb-7 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-hairline bg-canvas-elevated px-4 py-3">
-              <div className="flex items-center gap-2 text-xs font-semibold text-ink">
-                <MapPin className="size-4 text-ember" />
-                <span>Filtrar salones por sede del restaurante:</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setSpaceLocationFilter("all")}
-                  className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
-                    spaceLocationFilter === "all"
-                      ? "bg-ink text-ivory"
-                      : "bg-canvas-muted text-ink-muted hover:text-ink"
-                  }`}
-                >
-                  Todas las sedes ({spaces.length} salones)
-                </button>
-                {locations.map((loc) => {
-                  const countInLoc = spaces.filter(
-                    (s) => s.location_id === loc.id
-                  ).length;
-                  return (
+            <div className="mb-7 space-y-2.5 rounded-2xl border border-hairline bg-canvas-elevated px-4 py-3.5">
+              {isMultiCity && (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline pb-2.5">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-ink">
+                    <MapPin className="size-4 text-ember" />
+                    <span>Ciudad del evento:</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <button
-                      key={loc.id}
                       type="button"
-                      onClick={() => setSpaceLocationFilter(loc.id)}
-                      className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
-                        spaceLocationFilter === loc.id
-                          ? "bg-ember text-ivory"
+                      onClick={() => {
+                        setSpaceCityFilter("all");
+                        setSpaceLocationFilter("all");
+                      }}
+                      className={`rounded-full px-3.5 py-1 text-xs font-semibold transition ${
+                        spaceCityFilter === "all"
+                          ? "bg-ink text-ivory"
                           : "bg-canvas-muted text-ink-muted hover:text-ink"
                       }`}
                     >
-                      {loc.name} ({countInLoc})
+                      Todas las ciudades ({cities.length})
                     </button>
-                  );
-                })}
+                    {cities.map((city) => {
+                      const cityLocs = locations.filter(
+                        (l) => (l.city || "Bogotá").trim() === city
+                      );
+                      const cityLocIds = new Set(cityLocs.map((l) => l.id));
+                      const countInCity = spaces.filter(
+                        (s) => s.location_id && cityLocIds.has(s.location_id)
+                      ).length;
+                      return (
+                        <button
+                          key={city}
+                          type="button"
+                          onClick={() => {
+                            setSpaceCityFilter(city);
+                            setSpaceLocationFilter(
+                              cityLocs.length === 1
+                                ? (cityLocs[0]?.id ?? "all")
+                                : "all"
+                            );
+                          }}
+                          className={`rounded-full px-3.5 py-1 text-xs font-semibold transition ${
+                            spaceCityFilter === city
+                              ? "bg-ember text-ivory"
+                              : "bg-canvas-muted text-ink-muted hover:text-ink"
+                          }`}
+                        >
+                          {city} ({countInCity})
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs font-semibold text-ink">
+                  {!isMultiCity && <MapPin className="size-4 text-ember" />}
+                  <span>
+                    {isMultiCity
+                      ? "Sede específica:"
+                      : "Filtrar salones por sede del restaurante:"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSpaceLocationFilter("all")}
+                    className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+                      spaceLocationFilter === "all"
+                        ? "bg-ink text-ivory"
+                        : "bg-canvas-muted text-ink-muted hover:text-ink"
+                    }`}
+                  >
+                    {spaceCityFilter === "all"
+                      ? `Todas las sedes (${spaces.length} salones)`
+                      : `Todas en ${spaceCityFilter}`}
+                  </button>
+                  {locations
+                    .filter(
+                      (loc) =>
+                        !isMultiCity ||
+                        spaceCityFilter === "all" ||
+                        (loc.city || "Bogotá").trim() === spaceCityFilter
+                    )
+                    .map((loc) => {
+                      const countInLoc = spaces.filter(
+                        (s) => s.location_id === loc.id
+                      ).length;
+                      return (
+                        <button
+                          key={loc.id}
+                          type="button"
+                          onClick={() => setSpaceLocationFilter(loc.id)}
+                          className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+                            spaceLocationFilter === loc.id
+                              ? "bg-ember text-ivory"
+                              : "bg-canvas-muted text-ink-muted hover:text-ink"
+                          }`}
+                        >
+                          {isMultiCity && spaceCityFilter === "all"
+                            ? `${loc.city} · ${loc.name}`
+                            : loc.name}{" "}
+                          ({countInLoc})
+                        </button>
+                      );
+                    })}
+                </div>
               </div>
             </div>
           )}
@@ -569,7 +665,11 @@ export function EventInquiryComposer({
                           {spaceLoc && locations.length > 1 ? (
                             <span className="inline-flex items-center gap-1 rounded-full border border-obsidian-border bg-obsidian/90 px-3 py-1 text-xs font-medium text-gold">
                               <MapPin className="size-3.5 text-ember-glow" />
-                              <span>{spaceLoc.name}</span>
+                              <span>
+                                {isMultiCity
+                                  ? `${spaceLoc.city} · ${spaceLoc.name}`
+                                  : spaceLoc.name}
+                              </span>
                             </span>
                           ) : (
                             <span />
@@ -1304,14 +1404,45 @@ export function EventInquiryComposer({
                     <select
                       id="locationSelect"
                       value={selectedLocationId}
-                      onChange={(e) => setSelectedLocationId(e.target.value)}
+                      onChange={(e) => {
+                        const nextLocId = e.target.value;
+                        setSelectedLocationId(nextLocId);
+                        const currentSpace = spaces.find(
+                          (s) => s.id === selectedSpaceId
+                        );
+                        if (
+                          currentSpace?.location_id &&
+                          currentSpace.location_id !== nextLocId
+                        ) {
+                          const matchingSpace = spaces.find(
+                            (s) => s.location_id === nextLocId
+                          );
+                          if (matchingSpace) {
+                            setSelectedSpaceId(matchingSpace.id);
+                          }
+                        }
+                      }}
                       className="h-11 w-full rounded-xl border border-border-strong bg-canvas px-3 text-base text-ink focus:border-ember focus:outline-none sm:text-sm"
                     >
-                      {locations.map((loc) => (
-                        <option key={loc.id} value={loc.id}>
-                          {loc.name}
-                        </option>
-                      ))}
+                      {isMultiCity
+                        ? cities.map((city) => (
+                            <optgroup key={city} label={city}>
+                              {locations
+                                .filter(
+                                  (l) => (l.city || "Bogotá").trim() === city
+                                )
+                                .map((loc) => (
+                                  <option key={loc.id} value={loc.id}>
+                                    {loc.name}
+                                  </option>
+                                ))}
+                            </optgroup>
+                          ))
+                        : locations.map((loc) => (
+                            <option key={loc.id} value={loc.id}>
+                              {loc.name}
+                            </option>
+                          ))}
                     </select>
                   </div>
                 )}

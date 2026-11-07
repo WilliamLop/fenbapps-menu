@@ -22,6 +22,7 @@ export type Database = {
           entity_id: string | null
           entity_type: string
           id: number
+          location_id: string | null
           new_state: Json | null
           previous_state: Json | null
           restaurant_id: string
@@ -33,6 +34,7 @@ export type Database = {
           entity_id?: string | null
           entity_type: string
           id?: never
+          location_id?: string | null
           new_state?: Json | null
           previous_state?: Json | null
           restaurant_id: string
@@ -44,11 +46,19 @@ export type Database = {
           entity_id?: string | null
           entity_type?: string
           id?: never
+          location_id?: string | null
           new_state?: Json | null
           previous_state?: Json | null
           restaurant_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "audit_logs_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "audit_logs_restaurant_id_fkey"
             columns: ["restaurant_id"]
@@ -489,6 +499,7 @@ export type Database = {
           contact_phone: string | null
           cover_image_url: string | null
           created_at: string
+          delivery_config: Json | null
           description: string | null
           exclusive_features: string[]
           gallery_urls: Json
@@ -503,6 +514,7 @@ export type Database = {
           restaurant_id: string
           slug: string
           sort_order: number
+          timezone: string
           updated_at: string
           whatsapp_phone: string | null
         }
@@ -512,6 +524,7 @@ export type Database = {
           contact_phone?: string | null
           cover_image_url?: string | null
           created_at?: string
+          delivery_config?: Json | null
           description?: string | null
           exclusive_features?: string[]
           gallery_urls?: Json
@@ -526,6 +539,7 @@ export type Database = {
           restaurant_id: string
           slug: string
           sort_order?: number
+          timezone?: string
           updated_at?: string
           whatsapp_phone?: string | null
         }
@@ -535,6 +549,7 @@ export type Database = {
           contact_phone?: string | null
           cover_image_url?: string | null
           created_at?: string
+          delivery_config?: Json | null
           description?: string | null
           exclusive_features?: string[]
           gallery_urls?: Json
@@ -549,6 +564,7 @@ export type Database = {
           restaurant_id?: string
           slug?: string
           sort_order?: number
+          timezone?: string
           updated_at?: string
           whatsapp_phone?: string | null
         }
@@ -615,6 +631,61 @@ export type Database = {
           },
           {
             foreignKeyName: "menus_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_locations: {
+        Row: {
+          availability_status: string
+          id: string
+          is_offered: boolean
+          location_id: string
+          price_override: number | null
+          product_id: string
+          restaurant_id: string
+          updated_at: string
+        }
+        Insert: {
+          availability_status?: string
+          id?: string
+          is_offered?: boolean
+          location_id: string
+          price_override?: number | null
+          product_id: string
+          restaurant_id: string
+          updated_at?: string
+        }
+        Update: {
+          availability_status?: string
+          id?: string
+          is_offered?: boolean
+          location_id?: string
+          price_override?: number | null
+          product_id?: string
+          restaurant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_locations_location_id_restaurant_id_fkey"
+            columns: ["location_id", "restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id", "restaurant_id"]
+          },
+          {
+            foreignKeyName: "product_locations_product_id_restaurant_id_fkey"
+            columns: ["product_id", "restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id", "restaurant_id"]
+          },
+          {
+            foreignKeyName: "product_locations_restaurant_id_fkey"
             columns: ["restaurant_id"]
             isOneToOne: false
             referencedRelation: "restaurants"
@@ -827,11 +898,105 @@ export type Database = {
           },
         ]
       }
+      restaurant_entitlements: {
+        Row: {
+          design_tier: string
+          extra_location_fee: number
+          feature_overrides: Json
+          max_locations: number
+          monthly_base_fee: number
+          plan_tier: string
+          restaurant_id: string
+          setup_one_time_fee: number
+          subscription_status: string
+          updated_at: string
+        }
+        Insert: {
+          design_tier?: string
+          extra_location_fee?: number
+          feature_overrides?: Json
+          max_locations?: number
+          monthly_base_fee?: number
+          plan_tier?: string
+          restaurant_id: string
+          setup_one_time_fee?: number
+          subscription_status?: string
+          updated_at?: string
+        }
+        Update: {
+          design_tier?: string
+          extra_location_fee?: number
+          feature_overrides?: Json
+          max_locations?: number
+          monthly_base_fee?: number
+          plan_tier?: string
+          restaurant_id?: string
+          setup_one_time_fee?: number
+          subscription_status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "restaurant_entitlements_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: true
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      restaurant_member_locations: {
+        Row: {
+          created_at: string
+          id: string
+          location_id: string
+          member_id: string
+          restaurant_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          location_id: string
+          member_id: string
+          restaurant_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          location_id?: string
+          member_id?: string
+          restaurant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "restaurant_member_locations_location_id_restaurant_id_fkey"
+            columns: ["location_id", "restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id", "restaurant_id"]
+          },
+          {
+            foreignKeyName: "restaurant_member_locations_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "restaurant_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "restaurant_member_locations_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       restaurant_members: {
         Row: {
           created_at: string
           id: string
           is_active: boolean
+          location_scope: string
           restaurant_id: string
           role: string
           updated_at: string
@@ -841,6 +1006,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          location_scope?: string
           restaurant_id: string
           role: string
           updated_at?: string
@@ -850,6 +1016,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          location_scope?: string
           restaurant_id?: string
           role?: string
           updated_at?: string
@@ -925,7 +1092,7 @@ export type Database = {
     }
     Functions: {
       get_operational_console_snapshot: {
-        Args: { p_restaurant_slug: string }
+        Args: { p_location_id?: string; p_restaurant_slug: string }
         Returns: Json
       }
       submit_public_direct_order: {
@@ -971,6 +1138,21 @@ export type Database = {
         }
         Returns: Json
       }
+      super_admin_list_tenants: { Args: never; Returns: Json }
+      super_admin_update_entitlements: {
+        Args: {
+          p_design_tier: string
+          p_extra_location_fee: number
+          p_feature_overrides?: Json
+          p_max_locations: number
+          p_monthly_base_fee: number
+          p_plan_tier: string
+          p_restaurant_id: string
+          p_setup_one_time_fee: number
+          p_subscription_status: string
+        }
+        Returns: Json
+      }
       update_direct_order_status: {
         Args: {
           p_internal_notes: string
@@ -993,6 +1175,7 @@ export type Database = {
         Args: {
           p_availability_status: string
           p_base_price: number
+          p_location_id?: string
           p_product_id: string
           p_restaurant_slug: string
         }
@@ -1130,4 +1313,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-

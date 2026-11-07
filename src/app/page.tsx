@@ -3,9 +3,13 @@ import Link from "next/link";
 import {
   ArrowRight,
   CheckCircle2,
+  Crown,
   Flame,
+  Layers,
   LayoutDashboard,
   Leaf,
+  Lock,
+  MapPin,
   QrCode,
   ShieldCheck,
   ShoppingBag,
@@ -28,23 +32,30 @@ export default function PlatformShowcasePage() {
                 Fenbapps Hospitality Suite
               </span>
               <span className="mt-0.5 block text-xs font-medium text-ink-muted">
-                Carta Digital · Domicilios 0% Comisión · Eventos & CRM
+                Carta Digital · Domicilios 0% Comisión · Eventos CRM · Multi-Ciudad
               </span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <Link
-              href="/casa-brasa"
-              className="hidden sm:inline-flex min-h-10 items-center gap-1.5 rounded-full border border-hairline bg-canvas-elevated px-4 py-2 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
+              href="/super-admin"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-obsidian px-4 py-2 text-xs font-semibold text-gold shadow-xs transition hover:bg-ink"
             >
-              <span>Ver Multi-Sede</span>
+              <Layers className="size-3.5" />
+              <span>Consola Super-Admin</span>
+            </Link>
+            <Link
+              href="/casa-brasa"
+              className="hidden md:inline-flex min-h-10 items-center gap-1.5 rounded-full border border-hairline bg-canvas-elevated px-4 py-2 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
+            >
+              <span>Multi-Ciudad (3 Sedes)</span>
             </Link>
             <Link
               href="/botanica-brunch"
-              className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory shadow-xs transition hover:bg-ember-hover"
+              className="hidden sm:inline-flex min-h-10 items-center gap-1.5 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory shadow-xs transition hover:bg-ember-hover"
             >
-              <span>Ver Sede Única</span>
+              <span>Sede Única</span>
               <ArrowRight className="size-3.5" />
             </Link>
           </div>
@@ -57,27 +68,26 @@ export default function PlatformShowcasePage() {
           <div className="max-w-3xl">
             <span className="inline-flex items-center gap-2 rounded-full border border-ember/25 bg-surface-accent px-3.5 py-1.5 text-xs font-semibold text-ember">
               <Sparkles className="size-3.5" />
-              <span>Arquitectura Multi-Marca Adaptativa · Un Solo Motor SaaS</span>
+              <span>Arquitectura Multi-Marca, Multi-Ciudad & Planes SaaS en Tiempo Real</span>
             </span>
             <h1 className="mt-4 font-display text-4xl font-semibold leading-[1.08] tracking-tight text-ink sm:text-6xl">
-              Dos mundos gastronómicos, una experiencia sin fricción ni comisiones.
+              Diseño editorial de pago único y motor operativo SaaS recurrente.
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-relaxed text-ink-muted sm:text-lg">
-              Explora en tiempo real cómo nuestra plataforma adapta su identidad
-              cromática, retículas espaciales, carta en mesa/domicilio y dossier
-              de eventos tanto para grupos gastronómicos con múltiples sedes
-              como para restaurantes independientes de una sola casa.
+              Explora cómo la suite adapta diseño a medida, operación aislada por
+              ciudad y sede, carta en mesa/domicilio 0% comisión y control en vivo
+              de planes comerciales (`Basic`, `Standard`, `Full` y `Modo Vitrina`).
             </p>
           </div>
 
           {/* Dual Live Scenario Cards */}
           <div className="mt-10 grid grid-cols-1 gap-8 lg:grid-cols-2">
-            {/* Scenario 1: Casa Brasa (Multi-Sede · Nocturnal Oak & Ember) */}
+            {/* Scenario 1: Casa Brasa (Multi-Ciudad · Bogotá & Medellín · 3 Sedes) */}
             <article className="flex flex-col overflow-hidden rounded-3xl border border-hairline bg-canvas-elevated shadow-md transition hover:shadow-xl">
               <div className="relative aspect-[16/9] w-full overflow-hidden bg-canvas-muted">
                 <Image
                   src="/demo/casa-brasa/hero-steak.jpg"
-                  alt="Casa Brasa · Escenario Multi-Sede"
+                  alt="Casa Brasa · Escenario Multi-Ciudad"
                   fill
                   priority
                   sizes="(max-width: 1024px) 100vw, 50vw"
@@ -87,10 +97,10 @@ export default function PlatformShowcasePage() {
                 <div className="absolute top-4 left-4 flex flex-wrap gap-2">
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-obsidian/90 px-3 py-1 text-xs font-semibold text-gold backdrop-blur-xs">
                     <Flame className="size-3.5 text-ember-glow" />
-                    <span>Escenario Multi-Sede (2 Sedes)</span>
+                    <span>Multi-Ciudad (Bogotá & Medellín · 3 Sedes)</span>
                   </span>
                   <span className="rounded-full bg-ember px-3 py-1 text-xs font-semibold text-ivory">
-                    Tema: Brasa & Roble
+                    Plan Full + Diseño Premium
                   </span>
                 </div>
                 <div className="absolute right-5 bottom-4 left-5 text-ivory">
@@ -98,7 +108,7 @@ export default function PlatformShowcasePage() {
                     Casa Brasa · Fuego, Cava & Autor
                   </h2>
                   <p className="mt-0.5 text-sm text-ivory/90">
-                    Parque de la 93 & Zona G · Cortes madurados, cava y 3 salones privados
+                    Bogotá (Parque 93 & Zona G) + Medellín (Provenza) · 4 salones privados
                   </p>
                 </div>
               </div>
@@ -109,18 +119,18 @@ export default function PlatformShowcasePage() {
                     <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-ember" />
                     <span>
                       <strong className="font-semibold text-ink">
-                        Diferenciales por sede:
+                        Aislamiento total por ciudad y sede:
                       </strong>{" "}
-                      platos exclusivos en Parque 93 o Zona G, filtro inteligente de carta y validación automática en domicilios.
+                      agotados regionales, precio diferencial por sede, tarifa de domicilio y cuenta Bre-B independiente sin mezclar comandas en el CRM.
                     </span>
                   </li>
                   <li className="flex items-start gap-2.5">
                     <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-ember" />
                     <span>
                       <strong className="font-semibold text-ink">
-                        3 Salones & 3 Paquetes:
+                        4 Salones en 2 ciudades & Simulador en vivo:
                       </strong>{" "}
-                      comparativa visual con galerías múltiples, filtro por sede y cotizador corporativo.
+                      prueba el cambio instantáneo entre Plan Full, Standard, Basic y Modo Vitrina con el botón flotante (`Shift+P`).
                     </span>
                   </li>
                 </ul>
@@ -149,7 +159,7 @@ export default function PlatformShowcasePage() {
                     className="inline-flex min-h-10 items-center justify-center gap-1 rounded-xl bg-obsidian px-3 py-2 text-xs font-semibold text-ivory transition hover:bg-ink"
                   >
                     <LayoutDashboard className="size-3.5 text-gold" />
-                    <span>Consola</span>
+                    <span>CRM Multi-Sede</span>
                   </Link>
                 </div>
               </div>
@@ -243,6 +253,51 @@ export default function PlatformShowcasePage() {
           </div>
         </section>
 
+        {/* Commercial Architecture Strip: 2-Axis SaaS & Super-Admin CTA */}
+        <section className="mx-auto max-w-6xl px-4 pb-14 sm:px-6">
+          <div className="overflow-hidden rounded-3xl border border-obsidian-border bg-obsidian p-6 text-ivory shadow-xl sm:p-9">
+            <div className="grid grid-cols-1 items-center gap-8 lg:grid-cols-12">
+              <div className="lg:col-span-8">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-gold/30 bg-obsidian-card px-3 py-1 text-xs font-semibold text-gold">
+                  <Crown className="size-3.5" />
+                  <span>Modelo de Negocio B2B · Fenbapps Control Plane</span>
+                </span>
+                <h2 className="mt-3 font-display text-3xl font-semibold text-ivory sm:text-4xl">
+                  Gobierna Diseño Único + Membresía SaaS por Sede desde /super-admin
+                </h2>
+                <p className="mt-2.5 text-sm leading-relaxed text-ivory-muted sm:text-base">
+                  Activa o desactiva módulos en tiempo real (`Basic`, `Standard`, `Full`), calcula el MRR automático por sede adicional y protege tu recurrencia con el{" "}
+                  <strong className="font-semibold text-gold">
+                    Modo Vitrina Estática
+                  </strong>{" "}
+                  (respeta la web pagada sin errores 404 en códigos QR, pero congela carrito, domicilios y CRM en PostgreSQL ante impago mensual).
+                </p>
+                <div className="mt-5 flex flex-wrap gap-3 text-xs text-ivory-muted">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-obsidian-border bg-obsidian-card px-3 py-1.5">
+                    <MapPin className="size-3.5 text-ember-glow" />
+                    <span>Cobro aditivo por sede activa</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-obsidian-border bg-obsidian-card px-3 py-1.5">
+                    <Lock className="size-3.5 text-gold" />
+                    <span>Bloqueo Zero-Trust en RPCs PostgreSQL</span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-col items-start gap-3 lg:col-span-4 lg:items-end">
+                <Link
+                  href="/super-admin"
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-gold px-6 py-3 text-sm font-bold text-obsidian shadow-md transition hover:opacity-95 sm:w-auto"
+                >
+                  <Layers className="size-4" />
+                  <span>Abrir Super-Admin de Planes</span>
+                  <ArrowRight className="size-4" />
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* Core Capabilities Pillar Strip */}
         <section className="border-t border-hairline bg-canvas-elevated py-14">
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
@@ -267,7 +322,7 @@ export default function PlatformShowcasePage() {
                   Domicilios & Recogida 0% Comisión
                 </h3>
                 <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-                  Canal propio desde casa con cálculo automático de envío gratis, efectivo con vueltas exactas, datáfono o transferencia con copia de cuenta en 1 clic.
+                  Canal propio desde casa con logística independiente por ciudad/sede, efectivo con vueltas exactas, datáfono o transferencia con copia en 1 clic.
                 </p>
               </div>
 
@@ -276,10 +331,10 @@ export default function PlatformShowcasePage() {
                   <ShieldCheck className="size-5" />
                 </div>
                 <h3 className="mt-4 font-display text-2xl font-semibold text-ink">
-                  Consola en Vivo & Aislamiento RLS
+                  CRM Multi-Sede & Aislamiento RLS
                 </h3>
                 <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-                  Agota platos en 1 segundo, gestiona comandas directas, cotiza eventos privados en el Mini-CRM y audita cada cambio bajo PostgreSQL RLS estricto.
+                  Cada administrador de sede opera sus propios agotados, pedidos y eventos sin mezclar ciudades, con vista consolidada ejecutiva para el dueño.
                 </p>
               </div>
             </div>

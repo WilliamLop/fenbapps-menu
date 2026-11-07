@@ -2,12 +2,14 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
 import {
   UtensilsCrossed,
   CalendarCheck,
   QrCode,
   ShieldCheck,
+  ShieldAlert,
   CheckCircle2,
   AlertCircle,
   EyeOff,
@@ -29,6 +31,10 @@ import {
   Banknote,
   CreditCard,
   Smartphone,
+  Lock,
+  Layers,
+  Crown,
+  Globe,
 } from "lucide-react";
 import {
   formatCurrency,
@@ -36,6 +42,11 @@ import {
   sanitizeNumericInput,
 } from "@/lib/utils";
 import { TIME_SLOT_LABELS } from "@/lib/validators/events";
+import {
+  PLAN_TIERS_META,
+  type EffectiveCapabilities,
+  type SimPlanPreset,
+} from "@/lib/saas-entitlements";
 import type {
   OperationalProductItem,
   OperationalInquiryItem,
@@ -43,7 +54,6 @@ import type {
   OperationalAuditLogItem,
 } from "@/modules/admin/queries";
 import type {
-  EnabledModulesConfig,
   LocationRow,
   EventSpaceRow,
   EventPackageRow,
@@ -52,13 +62,18 @@ import {
   updateProductOperationalStateAction,
   updateEventInquiryOperationalStateAction,
   updateDirectOrderStatusAction,
+  setSimPlanCookieAction,
 } from "@/modules/admin/actions";
+
+type ConsoleTabId = "platos" | "pedidos" | "eventos" | "qr";
 
 interface InteractiveDashboardConsoleProps {
   restaurantSlug: string;
   restaurantName: string;
   currencyCode: string;
-  enabledModules?: EnabledModulesConfig;
+  capabilities: EffectiveCapabilities;
+  selectedLocation?: LocationRow | null;
+  initialTab?: string;
   deliveryEnabled?: boolean;
   initialProducts: OperationalProductItem[];
   initialInquiries: OperationalInquiryItem[];
@@ -138,6 +153,18 @@ const DIRECT_ORDER_STATUS_OPTIONS: Array<{
   },
 ];
 
+function resolveInitialTab(raw?: string): ConsoleTabId {
+  if (
+    raw === "platos" ||
+    raw === "pedidos" ||
+    raw === "eventos" ||
+    raw === "qr"
+  ) {
+    return raw;
+  }
+  return "platos";
+}
+
 /**
  * Generates a real, 100% scannable ISO/IEC 18004 QR matrix using the `qrcode`
  * library with Reed-Solomon Level M error correction.
@@ -164,7 +191,9 @@ export function InteractiveDashboardConsole({
   restaurantSlug,
   restaurantName,
   currencyCode,
-  enabledModules = { menu: true, events: true, site: true },
+  capabilities,
+  selectedLocation = null,
+  initialTab,
   deliveryEnabled = true,
   initialProducts,
   initialInquiries,
@@ -174,9 +203,10 @@ export function InteractiveDashboardConsole({
   eventSpaces,
   eventPackages,
 }: InteractiveDashboardConsoleProps) {
-  const [activeTab, setActiveTab] = useState<
-    "platos" | "pedidos" | "eventos" | "qr"
-  >("platos");
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<ConsoleTabId>(() =>
+    resolveInitialTab(initialTab)
+  );
   const [products, setProducts] =
     useState<OperationalProductItem[]>(initialProducts);
   const [inquiries, setInquiries] =
@@ -212,6 +242,13 @@ export function InteractiveDashboardConsole({
   const [isPending, startTransition] = useTransition();
 
   const isMultiLocation = locations.length > 1;
+  const uniqueCities = Array.from(
+    new Set(locations.map((l) => l.city).filter(Boolean))
+  );
+  const isReadOnlyMutations =
+    !capabilities.catalogMutationsEnabled ||
+    capabilities.isVitrineOnly ||
+    capabilities.isSuspended;
 
   const availableCount = products.filter(
     (p) => p.availability_status === "available"
@@ -255,11 +292,55 @@ export function InteractiveDashboardConsole({
     return true;
   });
 
+  function buildDashboardHref(
+    locationSlug: string | null,
+    tab: ConsoleTabId = activeTab
+  ): string {
+    const params = new URLSearchParams();
+    if (locationSlug) {
+      params.set("sede", locationSlug);
+    }
+    if (tab !== "platos") {
+      params.set("tab", tab);
+    }
+    if (capabilities.isSimulated && capabilities.simPreset !== "real") {
+      params.set("plan", capabilities.simPreset);
+    }
+    const qs = params.toString();
+    return `/dashboard/${restaurantSlug}${qs ? `?${qs}` : ""}`;
+  }
+
+  function appendSimPlanParam(baseRelativeUrl: string): string {
+    if (!capabilities.isSimulated || capabilities.simPreset === "real") {
+      return baseRelativeUrl;
+    }
+    const sep = baseRelativeUrl.includes("?") ? "&" : "?";
+    return `${baseRelativeUrl}${sep}plan=${encodeURIComponent(
+      capabilities.simPreset
+    )}`;
+  }
+
+  function handleQuickSimPreset(nextPreset: SimPlanPreset) {
+    startTransition(async () => {
+      const res = await setSimPlanCookieAction(nextPreset, restaurantSlug);
+      if (!res.ok) {
+        setFeedbackBanner({
+          type: "error",
+          text: res.error ?? "No fue posible cambiar la simulación del plan.",
+        });
+        return;
+      }
+      router.refresh();
+    });
+  }
+
   function handleAvailabilityChange(
     product: OperationalProductItem,
     newStatus: "available" | "sold_out" | "hidden"
   ) {
-    if (product.availability_status === newStatus) return;
+    if (isReadOnlyMutations || product.availability_status === newStatus) {
+      return;
+    }
 
     const prevProducts = [...products];
     setProducts((curr) =>
@@ -274,6 +355,7 @@ export function InteractiveDashboardConsole({
         productId: product.id,
         availabilityStatus: newStatus,
         basePrice: Number(product.base_price),
+        locationId: selectedLocation?.id ?? null,
       });
 
       if (!res.ok) {
@@ -292,10 +374,18 @@ export function InteractiveDashboardConsole({
             ? "Agotado por hoy"
             : "Oculto en carta";
 
+      const scopeNote = selectedLocation
+        ? `solo en ${selectedLocation.city} · ${selectedLocation.name} (las demás sedes no se afectan)`
+        : "a nivel global de marca";
+
       setAuditLogs((curr) => [
         {
           id: Date.now(),
-          action: "product.operational_update",
+          location_id: selectedLocation?.id ?? null,
+          location_name: selectedLocation?.name ?? null,
+          action: selectedLocation
+            ? "product.location_operational_update"
+            : "product.operational_update",
           entity_type: "product",
           entity_id: product.id,
           previous_state: {
@@ -313,12 +403,14 @@ export function InteractiveDashboardConsole({
 
       setFeedbackBanner({
         type: "success",
-        text: `¡Actualizado en vivo! "${product.name}" ahora está marcado como ${statusLabel} en la carta pública.`,
+        text: `¡Actualizado en vivo! "${product.name}" ahora está como ${statusLabel} ${scopeNote}.`,
       });
     });
   }
 
   function handleSavePrice(product: OperationalProductItem) {
+    if (isReadOnlyMutations) return;
+
     const parsedPrice = Number(priceDraft.replace(/[^0-9]/g, ""));
     if (!parsedPrice || parsedPrice < 1000) {
       setFeedbackBanner({
@@ -331,7 +423,15 @@ export function InteractiveDashboardConsole({
     const prevProducts = [...products];
     setProducts((curr) =>
       curr.map((p) =>
-        p.id === product.id ? { ...p, base_price: parsedPrice } : p
+        p.id === product.id
+          ? {
+              ...p,
+              base_price: parsedPrice,
+              price_override: selectedLocation
+                ? parsedPrice
+                : p.price_override ?? null,
+            }
+          : p
       )
     );
     setEditingPriceId(null);
@@ -342,6 +442,7 @@ export function InteractiveDashboardConsole({
         productId: product.id,
         availabilityStatus: product.availability_status,
         basePrice: parsedPrice,
+        locationId: selectedLocation?.id ?? null,
       });
 
       if (!res.ok) {
@@ -353,12 +454,16 @@ export function InteractiveDashboardConsole({
         return;
       }
 
+      const scopeNote = selectedLocation
+        ? `como tarifa regional exclusiva de ${selectedLocation.city} (${selectedLocation.name})`
+        : "como precio base global";
+
       setFeedbackBanner({
         type: "success",
         text: `Precio de "${product.name}" actualizado a ${formatCurrency(
           parsedPrice,
           currencyCode
-        )} en tiempo real.`,
+        )} ${scopeNote}.`,
       });
     });
   }
@@ -367,6 +472,8 @@ export function InteractiveDashboardConsole({
     inquiry: OperationalInquiryItem,
     newStatus: OperationalInquiryItem["status"]
   ) {
+    if (isReadOnlyMutations || !capabilities.eventsEnabled) return;
+
     const notes = inquiryNotesDraft[inquiry.id] ?? "";
     const prevInquiries = [...inquiries];
 
@@ -398,6 +505,8 @@ export function InteractiveDashboardConsole({
       setAuditLogs((curr) => [
         {
           id: Date.now(),
+          location_id: inquiry.location_id ?? null,
+          location_name: inquiry.location_name ?? null,
           action: "event_inquiry.status_update",
           entity_type: "event_inquiry",
           entity_id: inquiry.id,
@@ -425,6 +534,8 @@ export function InteractiveDashboardConsole({
     order: OperationalDirectOrderItem,
     newStatus: OperationalDirectOrderItem["status"]
   ) {
+    if (isReadOnlyMutations || !capabilities.directOrdersEnabled) return;
+
     const prevOrders = [...directOrders];
     setDirectOrders((curr) =>
       curr.map((item) =>
@@ -452,6 +563,8 @@ export function InteractiveDashboardConsole({
       setAuditLogs((curr) => [
         {
           id: Date.now(),
+          location_id: order.location_id ?? null,
+          location_name: order.location_name ?? null,
           action: "direct_order.status_update",
           entity_type: "direct_order",
           entity_id: order.id,
@@ -477,45 +590,74 @@ export function InteractiveDashboardConsole({
     });
   }
 
+  const qrLocations = selectedLocation ? [selectedLocation] : locations;
+
   const qrTargets = [
-    ...(enabledModules.menu
-      ? locations.map((loc, idx) => ({
+    ...(capabilities.menuVitrineEnabled
+      ? qrLocations.map((loc, idx) => ({
           key: `menu-table-${loc.slug}`,
           badge: isMultiLocation
-            ? `QR de Mesa · ${loc.name}`
+            ? `QR de Mesa · ${loc.city} (${loc.name})`
             : "QR de Mesa · Salón Principal",
           title: `Carta en Mesa · ${loc.name}`,
-          subtitle: isMultiLocation
-            ? "Abre la carta limpia en Modo Mesa sin distractores de domicilio, pre-filtrada en esta sede."
-            : "Abre la carta directamente en Modo Mesa con cálculo de propina y división de cuenta.",
-          relativeUrl: `/${restaurantSlug}/menu?sede=${loc.slug}&mesa=${idx + 1}`,
+          subtitle: capabilities.isVitrineOnly
+            ? "Modo Vitrina Estática: abre la carta de lectura sin errores 404 (carrito y pedidos pausados)."
+            : isMultiLocation
+              ? `Abre la carta limpia en Modo Mesa pre-filtrada en ${loc.city} · ${loc.name} con su stock y precios regionales.`
+              : "Abre la carta directamente en Modo Mesa con cálculo de propina y división de cuenta.",
+          relativeUrl: appendSimPlanParam(
+            `/${restaurantSlug}/menu?sede=${loc.slug}&mesa=${idx + 1}`
+          ),
         }))
       : []),
-    ...(enabledModules.menu && deliveryEnabled
+    ...(capabilities.menuVitrineEnabled &&
+    capabilities.directOrdersEnabled &&
+    deliveryEnabled
       ? [
           {
-            key: "direct-delivery",
-            badge: "QR / Link Canal Propio 0% Comisión",
-            title: `${restaurantName} · Pedidos a Domicilio & Recoger`,
-            subtitle:
-              "Ideal para perfil de Instagram, WhatsApp Business e impresos de empaque (abre directo en modo Domicilio).",
-            relativeUrl: `/${restaurantSlug}/menu?modo=domicilio`,
+            key: selectedLocation
+              ? `direct-delivery-${selectedLocation.slug}`
+              : "direct-delivery",
+            badge: selectedLocation
+              ? `QR Domicilios 0% · ${selectedLocation.city}`
+              : "QR / Link Canal Propio 0% Comisión",
+            title: selectedLocation
+              ? `Domicilios & Recoger · ${selectedLocation.name}`
+              : `${restaurantName} · Pedidos a Domicilio & Recoger`,
+            subtitle: selectedLocation
+              ? `Abre directo en checkout a domicilio asignado a ${selectedLocation.name} (${selectedLocation.city}).`
+              : "Ideal para Instagram, WhatsApp Business e impresos de empaque (abre directo en modo Domicilio).",
+            relativeUrl: appendSimPlanParam(
+              selectedLocation
+                ? `/${restaurantSlug}/menu?modo=domicilio&sede=${selectedLocation.slug}`
+                : `/${restaurantSlug}/menu?modo=domicilio`
+            ),
           },
         ]
       : []),
-    ...(enabledModules.events
+    ...(capabilities.eventsEnabled
       ? [
           {
-            key: "events-dossier",
-            badge: "QR Comercial Corporativo",
-            title: "Dossier de Salones & Cotizador de Eventos",
+            key: selectedLocation
+              ? `events-dossier-${selectedLocation.slug}`
+              : "events-dossier",
+            badge: selectedLocation
+              ? `QR Eventos · ${selectedLocation.city}`
+              : "QR Comercial Corporativo",
+            title: selectedLocation
+              ? `Salones & Cotizador · ${selectedLocation.name}`
+              : "Dossier de Salones & Cotizador de Eventos",
             subtitle:
               "Para enviar a empresas, organizadores de eventos o ubicar cerca a los salones privados.",
-            relativeUrl: `/${restaurantSlug}/eventos`,
+            relativeUrl: appendSimPlanParam(
+              selectedLocation
+                ? `/${restaurantSlug}/eventos?sede=${selectedLocation.slug}`
+                : `/${restaurantSlug}/eventos`
+            ),
           },
         ]
       : []),
-    ...(enabledModules.site
+    ...(capabilities.siteEnabled
       ? [
           {
             key: "brand-home",
@@ -523,7 +665,7 @@ export function InteractiveDashboardConsole({
             title: `${restaurantName} · Página Principal`,
             subtitle:
               "Ideal para tarjetas de presentación, prensa gastronómica y recepción.",
-            relativeUrl: `/${restaurantSlug}`,
+            relativeUrl: appendSimPlanParam(`/${restaurantSlug}`),
           },
         ]
       : []),
@@ -594,13 +736,203 @@ export function InteractiveDashboardConsole({
   }
 
   return (
-    <div className="space-y-8">
-      {/* Live Operational Metrics Grid (Tabular Lining Numerals for Instant Readability) */}
+    <div className="space-y-7">
+      {/* 0A. FROZEN VITRINE / SUSPENDED / GRACE PERIOD EXECUTIVE ALERT */}
+      {(capabilities.isVitrineOnly || capabilities.isSuspended) && (
+        <div
+          role="alert"
+          className="rounded-3xl border border-crimson/35 bg-crimson/8 p-5 text-ink shadow-2xs sm:p-6"
+        >
+          <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+            <div className="flex items-start gap-3.5">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-crimson text-ivory">
+                <ShieldAlert className="size-5" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-crimson px-2.5 py-0.5 text-[11px] font-bold tracking-wider text-ivory uppercase">
+                    {capabilities.isSuspended
+                      ? "Operación Suspendida"
+                      : "Modo Vitrina Estática Activo"}
+                  </span>
+                  {capabilities.isSimulated && (
+                    <span className="rounded-full border border-border-strong bg-canvas px-2.5 py-0.5 text-[11px] font-semibold text-ink-muted">
+                      Vista Simulada (Shift+P)
+                    </span>
+                  )}
+                </div>
+                <h3 className="mt-1.5 font-display text-xl font-semibold text-ink sm:text-2xl">
+                  {capabilities.isSuspended
+                    ? "Suscripción suspendida temporalmente"
+                    : "Suscripción Mensual Inactiva · Consola y Pedidos Congelados"}
+                </h3>
+                <p className="mt-1 max-w-3xl text-xs leading-relaxed text-ink-muted">
+                  El cliente conserva su diseño web a medida (pago único) y la
+                  lectura estática de la carta para que ningún código QR impreso
+                  arroje error 404, pero{" "}
+                  <strong className="text-ink">
+                    el carrito en mesa, los domicilios directos, el cotizador de
+                    eventos y la edición de precios/agotados en este CRM están
+                    bloqueados
+                  </strong>{" "}
+                  en servidor (PostgreSQL RLS/RPC) hasta reactivar la membresía
+                  mensual.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {capabilities.isSimulated && (
+                <button
+                  type="button"
+                  disabled={isPending}
+                  onClick={() => handleQuickSimPreset("real")}
+                  className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-border-strong bg-canvas px-4 py-2 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
+                >
+                  <span>Volver a estado real (BD)</span>
+                </button>
+              )}
+              <Link
+                href="/super-admin"
+                className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-obsidian px-4 py-2 text-xs font-semibold text-ivory transition hover:bg-ember"
+              >
+                <Layers className="size-3.5 text-gold" />
+                <span>Gestionar membresía en /super-admin</span>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {capabilities.subscriptionStatus === "past_due_grace" &&
+        !capabilities.isVitrineOnly &&
+        !capabilities.isSuspended && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-warn/40 bg-amber-warn/12 px-5 py-3.5 text-xs text-ink">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="size-4 shrink-0 text-amber-warn" />
+              <span>
+                <strong>Membresía en periodo de gracia:</strong> El sistema
+                mantiene todos los módulos activos temporalmente mientras se
+                procesa el pago mensual. Si vence el periodo de gracia, pasará
+                automáticamente a <strong>Modo Vitrina Estática</strong>.
+              </span>
+            </div>
+            <Link
+              href="/super-admin"
+              className="rounded-full bg-ink px-3.5 py-1.5 font-semibold text-ivory transition hover:bg-ember"
+            >
+              Revisar en /super-admin
+            </Link>
+          </div>
+        )}
+
+      {/* 0B. MULTI-CITY & MULTI-LOCATION OPERATIONAL ISOLATION BAR */}
+      {isMultiLocation && (
+        <section
+          aria-label="Selector de sede operativa aislada"
+          className="rounded-3xl border border-border-strong bg-canvas-elevated p-5 shadow-2xs"
+        >
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-semibold tracking-[0.12em] text-ember uppercase">
+                <Globe className="size-3.5" />
+                <span>
+                  Aislamiento Operativo Multi-Ciudad ({uniqueCities.join(" & ")})
+                </span>
+              </div>
+              <h2 className="mt-0.5 font-display text-xl font-semibold text-ink sm:text-2xl">
+                {selectedLocation
+                  ? `Operando Sede Aislada: ${selectedLocation.city} · ${selectedLocation.name}`
+                  : "Vista Consolidada de Marca (Dueño / Dirección General)"}
+              </h2>
+            </div>
+
+            <span className="w-fit rounded-full border border-hairline bg-canvas px-3 py-1 font-mono text-xs text-ink-muted">
+              {selectedLocation
+                ? `Bandejas 100% filtradas para ${selectedLocation.slug}`
+                : `${locations.length} sedes activas en ${uniqueCities.length} ${
+                    uniqueCities.length === 1 ? "ciudad" : "ciudades"
+                  }`}
+            </span>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link
+              href={buildDashboardHref(null)}
+              className={`inline-flex min-h-10 items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold transition ${
+                !selectedLocation
+                  ? "bg-ink text-ivory shadow-2xs"
+                  : "border border-border-strong bg-canvas text-ink-muted hover:border-ember hover:text-ink"
+              }`}
+            >
+              <Layers
+                className={`size-3.5 ${
+                  !selectedLocation ? "text-gold" : "text-ember"
+                }`}
+              />
+              <span>Consolidado Global (Dueño)</span>
+            </Link>
+
+            {locations.map((loc) => {
+              const isSelected = selectedLocation?.id === loc.id;
+              return (
+                <Link
+                  key={loc.id}
+                  href={buildDashboardHref(loc.slug)}
+                  className={`inline-flex min-h-10 items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold transition ${
+                    isSelected
+                      ? "bg-ember text-ivory shadow-2xs"
+                      : "border border-border-strong bg-canvas text-ink hover:border-ember hover:text-ember"
+                  }`}
+                >
+                  <MapPin
+                    className={`size-3.5 ${
+                      isSelected ? "text-ivory" : "text-ember"
+                    }`}
+                  />
+                  <span>
+                    {loc.city} · {loc.name}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+
+          <p className="mt-3 text-xs leading-relaxed text-ink-muted">
+            {selectedLocation ? (
+              <>
+                <strong className="text-ink">
+                  Cero cruce con otras ciudades o sedes:
+                </strong>{" "}
+                Cualquier plato que marques como agotado o cambies de precio en
+                esta vista se guarda en{" "}
+                <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-ember">
+                  public.product_locations
+                </code>{" "}
+                exclusivamente para{" "}
+                <strong className="text-ink">{selectedLocation.name}</strong>, y
+                las bandejas de Domicilios, Eventos y QR muestran solo esta sede.
+              </>
+            ) : (
+              <>
+                <strong className="text-ink">Supervisión Ejecutiva:</strong>{" "}
+                Estás viendo todas las sedes y editando el catálogo maestro. Haz
+                clic en cualquier sede arriba (ej.{" "}
+                <strong className="text-ink">Medellín · Sede Provenza</strong>)
+                para operar la consola aislada que ve el administrador de ese
+                punto.
+              </>
+            )}
+          </p>
+        </section>
+      )}
+
+      {/* Live Operational Metrics Grid */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5">
           <div className="flex items-center justify-between text-ink-muted">
             <span className="text-xs font-semibold uppercase tracking-wider">
-              Platos Disponibles
+              {selectedLocation ? "Platos en Sede" : "Platos Disponibles"}
             </span>
             <CheckCircle2 className="size-4 text-sage" />
           </div>
@@ -611,24 +943,45 @@ export function InteractiveDashboardConsole({
             </span>
           </p>
           <p className="mt-1 text-xs text-ink-muted">
-            {hiddenCount} ocultos · Control en 1 clic
+            {isReadOnlyMutations
+              ? "Modo lectura (edición congelada)"
+              : selectedLocation
+                ? `Stock aislado · ${selectedLocation.city}`
+                : `${hiddenCount} ocultos · Control en 1 clic`}
           </p>
         </div>
 
         <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5">
           <div className="flex items-center justify-between text-ink-muted">
             <span className="text-xs font-semibold uppercase tracking-wider">
-              Pedidos Directos (0% Comisión)
+              Pedidos Directos (0%)
             </span>
-            <Bike className="size-4 text-ember" />
+            {capabilities.directOrdersEnabled ? (
+              <Bike className="size-4 text-ember" />
+            ) : (
+              <Lock className="size-4 text-ink-muted" />
+            )}
           </div>
-          <p className="tabular-price mt-2 font-sans text-3xl font-bold text-ink sm:text-4xl">
-            {directOrders.length}
-          </p>
-          <p className="mt-1 text-xs font-semibold text-sage">
-            {activeOrdersCount} activos ·{" "}
-            {formatCurrency(totalDirectSalesAmount, currencyCode)} vendidos
-          </p>
+          {capabilities.directOrdersEnabled ? (
+            <>
+              <p className="tabular-price mt-2 font-sans text-3xl font-bold text-ink sm:text-4xl">
+                {directOrders.length}
+              </p>
+              <p className="mt-1 text-xs font-semibold text-sage">
+                {activeOrdersCount} activos ·{" "}
+                {formatCurrency(totalDirectSalesAmount, currencyCode)} vendidos
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="mt-2 font-display text-xl font-semibold text-ink-muted">
+                Plan Standard+
+              </p>
+              <p className="mt-1 text-xs text-ink-muted">
+                Domicilios y recoger sin comisión
+              </p>
+            </>
+          )}
         </div>
 
         <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5">
@@ -636,14 +989,31 @@ export function InteractiveDashboardConsole({
             <span className="text-xs font-semibold uppercase tracking-wider">
               Solicitudes Eventos
             </span>
-            <CalendarCheck className="size-4 text-ember" />
+            {capabilities.eventsEnabled ? (
+              <CalendarCheck className="size-4 text-ember" />
+            ) : (
+              <Lock className="size-4 text-ink-muted" />
+            )}
           </div>
-          <p className="tabular-price mt-2 font-sans text-3xl font-bold text-ink sm:text-4xl">
-            {inquiries.length}
-          </p>
-          <p className="mt-1 text-xs font-semibold text-ember">
-            {pendingInquiriesCount} por responder o cotizar
-          </p>
+          {capabilities.eventsEnabled ? (
+            <>
+              <p className="tabular-price mt-2 font-sans text-3xl font-bold text-ink sm:text-4xl">
+                {inquiries.length}
+              </p>
+              <p className="mt-1 text-xs font-semibold text-ember">
+                {pendingInquiriesCount} por responder o cotizar
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="mt-2 font-display text-xl font-semibold text-ink-muted">
+                Plan Full
+              </p>
+              <p className="mt-1 text-xs text-ink-muted">
+                Salones privados y Mini-CRM B2B
+              </p>
+            </>
+          )}
         </div>
 
         <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5">
@@ -654,16 +1024,20 @@ export function InteractiveDashboardConsole({
             <QrCode className="size-4 text-ember" />
           </div>
           <p className="tabular-price mt-2 font-sans text-3xl font-bold text-ink sm:text-4xl">
-            {locations.length}{" "}
+            {selectedLocation ? 1 : locations.length}{" "}
             <span className="text-sm font-medium text-ink-muted">
-              {locations.length === 1 ? "sede" : "sedes"} ·{" "}
-              {eventSpaces.length} salones
+              {(selectedLocation ? 1 : locations.length) === 1
+                ? "sede"
+                : "sedes"}{" "}
+              · {qrTargets.length} QRs
             </span>
           </p>
           <p className="mt-1 text-xs text-ink-muted">
-            {locations.length === 1
-              ? "Interfaz adaptada a sede única"
-              : "Modo Multi-Sede con diferenciales"}
+            {selectedLocation
+              ? `${selectedLocation.city} · ${eventSpaces.length} salón(es)`
+              : locations.length === 1
+                ? "Interfaz adaptada a sede única"
+                : `${uniqueCities.length} ciudades activas`}
           </p>
         </div>
       </div>
@@ -689,7 +1063,11 @@ export function InteractiveDashboardConsole({
           <div className="flex items-center gap-3">
             {feedbackBanner.type === "success" && activeTab === "platos" && (
               <Link
-                href={`/${restaurantSlug}/menu`}
+                href={appendSimPlanParam(
+                  selectedLocation
+                    ? `/${restaurantSlug}/menu?sede=${selectedLocation.slug}`
+                    : `/${restaurantSlug}/menu`
+                )}
                 className="inline-flex items-center gap-1 rounded-full bg-ink px-3.5 py-1.5 text-xs font-semibold text-ivory transition hover:bg-ember"
               >
                 <span>Ver cambio en Carta Digital</span>
@@ -729,7 +1107,12 @@ export function InteractiveDashboardConsole({
               activeTab === "platos" ? "text-gold" : "text-ember"
             }`}
           />
-          <span>1. Disponibilidad & Precios ({products.length})</span>
+          <span>1. Disponibilidad &amp; Precios ({products.length})</span>
+          {isReadOnlyMutations && (
+            <span className="rounded-full bg-crimson/20 px-2 py-0.5 text-[11px] font-bold text-crimson">
+              Congelado
+            </span>
+          )}
         </button>
 
         <button
@@ -743,12 +1126,26 @@ export function InteractiveDashboardConsole({
               : "border border-hairline bg-canvas-elevated text-ink-muted hover:text-ink"
           }`}
         >
-          <Bike
-            className={`size-4 ${
-              activeTab === "pedidos" ? "text-gold" : "text-ember"
-            }`}
-          />
-          <span>2. Pedidos & Domicilios ({directOrders.length})</span>
+          {capabilities.directOrdersEnabled ? (
+            <Bike
+              className={`size-4 ${
+                activeTab === "pedidos" ? "text-gold" : "text-ember"
+              }`}
+            />
+          ) : (
+            <Lock className="size-3.5 text-ember" />
+          )}
+          <span>
+            2. Pedidos &amp; Domicilios
+            {capabilities.directOrdersEnabled
+              ? ` (${directOrders.length})`
+              : ""}
+          </span>
+          {!capabilities.directOrdersEnabled && (
+            <span className="rounded-full border border-ember/30 bg-surface-accent px-2 py-0.5 text-[11px] font-bold text-ember">
+              Standard+
+            </span>
+          )}
         </button>
 
         <button
@@ -762,12 +1159,24 @@ export function InteractiveDashboardConsole({
               : "border border-hairline bg-canvas-elevated text-ink-muted hover:text-ink"
           }`}
         >
-          <CalendarCheck
-            className={`size-4 ${
-              activeTab === "eventos" ? "text-gold" : "text-ember"
-            }`}
-          />
-          <span>3. Mini-CRM de Eventos ({inquiries.length})</span>
+          {capabilities.eventsEnabled ? (
+            <CalendarCheck
+              className={`size-4 ${
+                activeTab === "eventos" ? "text-gold" : "text-ember"
+              }`}
+            />
+          ) : (
+            <Lock className="size-3.5 text-ember" />
+          )}
+          <span>
+            3. Mini-CRM de Eventos
+            {capabilities.eventsEnabled ? ` (${inquiries.length})` : ""}
+          </span>
+          {!capabilities.eventsEnabled && (
+            <span className="rounded-full border border-ember/30 bg-surface-accent px-2 py-0.5 text-[11px] font-bold text-ember">
+              Plan Full
+            </span>
+          )}
         </button>
 
         <button
@@ -795,13 +1204,39 @@ export function InteractiveDashboardConsole({
         <div className="overflow-hidden rounded-3xl border border-hairline bg-canvas-elevated">
           <div className="flex flex-col gap-4 border-b border-hairline px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <div>
+              <div className="mb-1 flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    selectedLocation
+                      ? "bg-ember text-ivory"
+                      : "border border-border-strong bg-canvas text-ink"
+                  }`}
+                >
+                  {selectedLocation ? (
+                    <>
+                      <MapPin className="size-3" />
+                      <span>
+                        Sede Aislada: {selectedLocation.city} ·{" "}
+                        {selectedLocation.name}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Layers className="size-3 text-ember" />
+                      <span>Catálogo Maestro de Marca</span>
+                    </>
+                  )}
+                </span>
+              </div>
               <h2 className="font-display text-2xl font-semibold text-ink">
                 Control de Disponibilidad en Cocina y Precios
               </h2>
               <p className="text-xs text-ink-muted">
-                Marca un plato como <strong>Agotado hoy</strong> u{" "}
-                <strong>Oculto</strong> en 1 clic. El cambio se guarda en
-                PostgreSQL y actualiza la carta al instante.
+                {isReadOnlyMutations
+                  ? "Vista de lectura: reactiva la membresía mensual para editar precios o disponibilidad en tiempo real."
+                  : selectedLocation
+                    ? `Los cambios aquí aplican únicamente a ${selectedLocation.name} (${selectedLocation.city}) sin alterar las demás sedes.`
+                    : "Marca un plato como Agotado hoy u Oculto en 1 clic. El cambio se guarda en PostgreSQL al instante."}
               </p>
             </div>
 
@@ -809,6 +1244,7 @@ export function InteractiveDashboardConsole({
               <div className="relative min-w-[220px] flex-1 sm:flex-initial">
                 <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-muted" />
                 <input
+                  suppressHydrationWarning
                   type="search"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -870,216 +1306,45 @@ export function InteractiveDashboardConsole({
             <>
               {/* Mobile Responsive Cards (< md) */}
               <div className="divide-y divide-hairline md:hidden">
-                {filteredProducts.map((product) => (
-                  <div key={product.id} className="space-y-3 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <span className="text-xs font-semibold uppercase tracking-wider text-ember">
-                          {product.category_name}
-                        </span>
-                        <h3 className="font-semibold text-ink">
-                          {product.name}
-                        </h3>
-                        {isMultiLocation && product.exclusive_location_name && (
-                          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
-                            <MapPin className="size-3" />
-                            <span>
-                              Exclusivo {product.exclusive_location_name}
-                            </span>
-                          </span>
-                        )}
-                      </div>
+                {filteredProducts.map((product) => {
+                  const hasRegionalPrice =
+                    selectedLocation != null &&
+                    product.price_override != null &&
+                    product.global_base_price != null &&
+                    Number(product.price_override) !==
+                      Number(product.global_base_price);
 
-                      <div className="text-right">
-                        {editingPriceId === product.id ? (
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="text"
-                              inputMode="numeric"
-                              pattern="[0-9]*"
-                              value={priceDraft}
-                              onChange={(e) =>
-                                setPriceDraft(
-                                  sanitizeNumericInput(e.target.value, 8)
-                                )
-                              }
-                              className="w-24 rounded-lg border border-ember bg-canvas px-2 py-1 font-mono text-base text-ink sm:text-xs"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleSavePrice(product)}
-                              className="rounded-lg bg-ember p-1.5 text-ivory"
-                              aria-label="Guardar precio"
-                            >
-                              <Save className="size-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingPriceId(product.id);
-                              setPriceDraft(String(product.base_price));
-                            }}
-                            className="inline-flex items-center gap-1 font-mono text-sm font-semibold text-ink hover:text-ember"
-                          >
-                            <span>
-                              {formatCurrency(
-                                Number(product.base_price),
-                                currencyCode
-                              )}
-                            </span>
-                            <Pencil className="size-3.5 text-ink-muted" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-1.5 pt-1">
-                      <button
-                        type="button"
-                        disabled={isPending}
-                        onClick={() =>
-                          handleAvailabilityChange(product, "available")
-                        }
-                        className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition ${
-                          product.availability_status === "available"
-                            ? "bg-sage text-ivory shadow-2xs"
-                            : "border border-hairline bg-canvas text-ink-muted"
-                        }`}
-                      >
-                        Disponible
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isPending}
-                        onClick={() =>
-                          handleAvailabilityChange(product, "sold_out")
-                        }
-                        className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition ${
-                          product.availability_status === "sold_out"
-                            ? "bg-amber-warn text-ivory shadow-2xs"
-                            : "border border-hairline bg-canvas text-ink-muted"
-                        }`}
-                      >
-                        Agotado hoy
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isPending}
-                        onClick={() =>
-                          handleAvailabilityChange(product, "hidden")
-                        }
-                        className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition ${
-                          product.availability_status === "hidden"
-                            ? "bg-ink text-ivory shadow-2xs"
-                            : "border border-hairline bg-canvas text-ink-muted"
-                        }`}
-                      >
-                        Ocultar
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Desktop Operational Table (>= md) */}
-              <div className="hidden overflow-x-auto md:block">
-                <table className="w-full text-left text-sm">
-                  <thead className="border-b border-hairline bg-canvas/60 text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                    <tr>
-                      <th className="px-6 py-3.5">Plato / Referencia</th>
-                      <th className="px-6 py-3.5">
-                        {isMultiLocation ? "Categoría & Sede" : "Categoría"}
-                      </th>
-                      <th className="px-6 py-3.5">Control de Estado en Vivo</th>
-                      <th className="px-6 py-3.5 text-right">Precio en Carta</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-hairline">
-                    {filteredProducts.map((product) => (
-                      <tr
-                        key={product.id}
-                        className="transition hover:bg-canvas/40"
-                      >
-                        <td className="px-6 py-4">
-                          <p className="font-semibold text-ink">
-                            {product.name}
-                          </p>
-                          <p className="text-xs text-ink-muted">
-                            {product.portion_label ?? "Porción estándar"}
-                          </p>
-                        </td>
-                        <td className="px-6 py-4 text-xs text-ink-muted">
-                          <span className="font-medium text-ink">
+                  return (
+                    <div key={product.id} className="space-y-3 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <span className="text-xs font-semibold uppercase tracking-wider text-ember">
                             {product.category_name}
                           </span>
-                          {isMultiLocation &&
-                            (product.exclusive_location_name ? (
-                              <span className="mt-1 flex w-fit items-center gap-1 rounded-full bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
-                                <MapPin className="size-3" />
-                                <span>
-                                  Exclusivo {product.exclusive_location_name}
-                                </span>
+                          <h3 className="font-semibold text-ink">
+                            {product.name}
+                          </h3>
+                          {isMultiLocation && product.exclusive_location_name && (
+                            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
+                              <MapPin className="size-3" />
+                              <span>
+                                Exclusivo {product.exclusive_location_name}
                               </span>
-                            ) : (
-                              <span className="mt-0.5 block text-xs text-ink-muted">
-                                Disponible en todas las sedes
+                            </span>
+                          )}
+                          {!selectedLocation &&
+                            (product.location_overrides_count ?? 0) > 0 && (
+                              <span className="mt-1 block text-[11px] font-medium text-ember">
+                                Con diferencial en{" "}
+                                {product.location_overrides_count} sede(s)
                               </span>
-                            ))}
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="inline-flex rounded-full border border-hairline bg-canvas p-1">
-                            <button
-                              type="button"
-                              disabled={isPending}
-                              onClick={() =>
-                                handleAvailabilityChange(product, "available")
-                              }
-                              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${
-                                product.availability_status === "available"
-                                  ? "bg-sage text-ivory shadow-2xs"
-                                  : "text-ink-muted hover:text-ink"
-                              }`}
-                            >
-                              <span className="size-1.5 rounded-full bg-current" />
-                              <span>Disponible</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isPending}
-                              onClick={() =>
-                                handleAvailabilityChange(product, "sold_out")
-                              }
-                              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${
-                                product.availability_status === "sold_out"
-                                  ? "bg-amber-warn text-ivory shadow-2xs"
-                                  : "text-ink-muted hover:text-ink"
-                              }`}
-                            >
-                              <span className="size-1.5 rounded-full bg-current" />
-                              <span>Agotado hoy</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={isPending}
-                              onClick={() =>
-                                handleAvailabilityChange(product, "hidden")
-                              }
-                              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${
-                                product.availability_status === "hidden"
-                                  ? "bg-ink text-ivory shadow-2xs"
-                                  : "text-ink-muted hover:text-ink"
-                              }`}
-                            >
-                              <EyeOff className="size-3" />
-                              <span>Oculto</span>
-                            </button>
-                          </div>
-                        </td>
-                        <td className="tabular-price px-6 py-4 text-right font-mono font-semibold text-ink">
-                          {editingPriceId === product.id ? (
-                            <div className="inline-flex items-center justify-end gap-1.5">
+                            )}
+                        </div>
+
+                        <div className="text-right">
+                          {editingPriceId === product.id &&
+                          !isReadOnlyMutations ? (
+                            <div className="flex items-center gap-1">
                               <input
                                 type="text"
                                 inputMode="numeric"
@@ -1090,33 +1355,26 @@ export function InteractiveDashboardConsole({
                                     sanitizeNumericInput(e.target.value, 8)
                                   )
                                 }
-                                className="w-28 rounded-xl border border-ember bg-canvas px-2.5 py-1 text-right font-mono text-xs text-ink focus:outline-none"
+                                className="w-24 rounded-lg border border-ember bg-canvas px-2 py-1 font-mono text-base text-ink sm:text-xs"
                               />
                               <button
                                 type="button"
                                 onClick={() => handleSavePrice(product)}
-                                className="inline-flex items-center gap-1 rounded-xl bg-ember px-2.5 py-1 font-sans text-xs font-semibold text-ivory hover:bg-ember-hover"
+                                className="rounded-lg bg-ember p-1.5 text-ivory"
+                                aria-label="Guardar precio"
                               >
                                 <Save className="size-3.5" />
-                                <span>Guardar</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingPriceId(null)}
-                                className="font-sans text-xs text-ink-muted hover:text-ink"
-                              >
-                                ✕
                               </button>
                             </div>
                           ) : (
                             <button
                               type="button"
+                              disabled={isReadOnlyMutations}
                               onClick={() => {
                                 setEditingPriceId(product.id);
                                 setPriceDraft(String(product.base_price));
                               }}
-                              title="Haz clic para editar el precio en vivo"
-                              className="inline-flex items-center justify-end gap-1.5 rounded-xl px-2.5 py-1 transition hover:bg-canvas"
+                              className="inline-flex items-center gap-1 font-mono text-sm font-semibold text-ink hover:text-ember disabled:cursor-not-allowed disabled:opacity-65"
                             >
                               <span>
                                 {formatCurrency(
@@ -1124,12 +1382,262 @@ export function InteractiveDashboardConsole({
                                   currencyCode
                                 )}
                               </span>
-                              <Pencil className="size-3.5 text-ink-muted" />
+                              {!isReadOnlyMutations && (
+                                <Pencil className="size-3.5 text-ink-muted" />
+                              )}
                             </button>
                           )}
-                        </td>
-                      </tr>
-                    ))}
+                          {hasRegionalPrice && (
+                            <span className="block text-[11px] text-ember">
+                              Tarifa {selectedLocation.city}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          disabled={isPending || isReadOnlyMutations}
+                          onClick={() =>
+                            handleAvailabilityChange(product, "available")
+                          }
+                          className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                            product.availability_status === "available"
+                              ? "bg-sage text-ivory shadow-2xs"
+                              : "border border-hairline bg-canvas text-ink-muted"
+                          }`}
+                        >
+                          Disponible
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isPending || isReadOnlyMutations}
+                          onClick={() =>
+                            handleAvailabilityChange(product, "sold_out")
+                          }
+                          className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                            product.availability_status === "sold_out"
+                              ? "bg-amber-warn text-ivory shadow-2xs"
+                              : "border border-hairline bg-canvas text-ink-muted"
+                          }`}
+                        >
+                          Agotado hoy
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isPending || isReadOnlyMutations}
+                          onClick={() =>
+                            handleAvailabilityChange(product, "hidden")
+                          }
+                          className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                            product.availability_status === "hidden"
+                              ? "bg-ink text-ivory shadow-2xs"
+                              : "border border-hairline bg-canvas text-ink-muted"
+                          }`}
+                        >
+                          Ocultar
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Operational Table (>= md) */}
+              <div className="hidden overflow-x-auto md:block">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b border-hairline bg-canvas/60 text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                    <tr>
+                      <th className="px-6 py-3.5">Plato / Referencia</th>
+                      <th className="px-6 py-3.5">
+                        {isMultiLocation ? "Categoría & Alcance" : "Categoría"}
+                      </th>
+                      <th className="px-6 py-3.5">
+                        {selectedLocation
+                          ? `Estado en ${selectedLocation.name}`
+                          : "Control de Estado en Vivo"}
+                      </th>
+                      <th className="px-6 py-3.5 text-right">
+                        {selectedLocation
+                          ? `Precio en ${selectedLocation.city}`
+                          : "Precio Base en Carta"}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-hairline">
+                    {filteredProducts.map((product) => {
+                      const hasRegionalPrice =
+                        selectedLocation != null &&
+                        product.price_override != null &&
+                        product.global_base_price != null &&
+                        Number(product.price_override) !==
+                          Number(product.global_base_price);
+
+                      return (
+                        <tr
+                          key={product.id}
+                          className="transition hover:bg-canvas/40"
+                        >
+                          <td className="px-6 py-4">
+                            <p className="font-semibold text-ink">
+                              {product.name}
+                            </p>
+                            <p className="text-xs text-ink-muted">
+                              {product.portion_label ?? "Porción estándar"}
+                            </p>
+                          </td>
+                          <td className="px-6 py-4 text-xs text-ink-muted">
+                            <span className="font-medium text-ink">
+                              {product.category_name}
+                            </span>
+                            {isMultiLocation &&
+                              (product.exclusive_location_name ? (
+                                <span className="mt-1 flex w-fit items-center gap-1 rounded-full bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
+                                  <MapPin className="size-3" />
+                                  <span>
+                                    Exclusivo {product.exclusive_location_name}
+                                  </span>
+                                </span>
+                              ) : !selectedLocation &&
+                                (product.location_overrides_count ?? 0) > 0 ? (
+                                <span className="mt-1 block text-xs font-medium text-ember">
+                                  Diferencial activo en{" "}
+                                  {product.location_overrides_count} sede(s)
+                                </span>
+                              ) : (
+                                <span className="mt-0.5 block text-xs text-ink-muted">
+                                  {selectedLocation
+                                    ? `Ofrecido en ${selectedLocation.city}`
+                                    : "Disponible en todas las sedes"}
+                                </span>
+                              ))}
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="inline-flex rounded-full border border-hairline bg-canvas p-1">
+                              <button
+                                type="button"
+                                disabled={isPending || isReadOnlyMutations}
+                                onClick={() =>
+                                  handleAvailabilityChange(product, "available")
+                                }
+                                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                  product.availability_status === "available"
+                                    ? "bg-sage text-ivory shadow-2xs"
+                                    : "text-ink-muted hover:text-ink"
+                                }`}
+                              >
+                                <span className="size-1.5 rounded-full bg-current" />
+                                <span>Disponible</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isPending || isReadOnlyMutations}
+                                onClick={() =>
+                                  handleAvailabilityChange(product, "sold_out")
+                                }
+                                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                  product.availability_status === "sold_out"
+                                    ? "bg-amber-warn text-ivory shadow-2xs"
+                                    : "text-ink-muted hover:text-ink"
+                                }`}
+                              >
+                                <span className="size-1.5 rounded-full bg-current" />
+                                <span>Agotado hoy</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isPending || isReadOnlyMutations}
+                                onClick={() =>
+                                  handleAvailabilityChange(product, "hidden")
+                                }
+                                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                  product.availability_status === "hidden"
+                                    ? "bg-ink text-ivory shadow-2xs"
+                                    : "text-ink-muted hover:text-ink"
+                                }`}
+                              >
+                                <EyeOff className="size-3" />
+                                <span>Oculto</span>
+                              </button>
+                            </div>
+                          </td>
+                          <td className="tabular-price px-6 py-4 text-right font-mono font-semibold text-ink">
+                            {editingPriceId === product.id &&
+                            !isReadOnlyMutations ? (
+                              <div className="inline-flex items-center justify-end gap-1.5">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  value={priceDraft}
+                                  onChange={(e) =>
+                                    setPriceDraft(
+                                      sanitizeNumericInput(e.target.value, 8)
+                                    )
+                                  }
+                                  className="w-28 rounded-xl border border-ember bg-canvas px-2.5 py-1 text-right font-mono text-xs text-ink focus:outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleSavePrice(product)}
+                                  className="inline-flex items-center gap-1 rounded-xl bg-ember px-2.5 py-1 font-sans text-xs font-semibold text-ivory hover:bg-ember-hover"
+                                >
+                                  <Save className="size-3.5" />
+                                  <span>Guardar</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingPriceId(null)}
+                                  className="font-sans text-xs text-ink-muted hover:text-ink"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-end">
+                                <button
+                                  type="button"
+                                  disabled={isReadOnlyMutations}
+                                  onClick={() => {
+                                    setEditingPriceId(product.id);
+                                    setPriceDraft(String(product.base_price));
+                                  }}
+                                  title={
+                                    isReadOnlyMutations
+                                      ? "Edición bloqueada en Modo Vitrina"
+                                      : "Haz clic para editar el precio en vivo"
+                                  }
+                                  className="inline-flex items-center justify-end gap-1.5 rounded-xl px-2.5 py-1 transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-65"
+                                >
+                                  <span>
+                                    {formatCurrency(
+                                      Number(product.base_price),
+                                      currencyCode
+                                    )}
+                                  </span>
+                                  {!isReadOnlyMutations ? (
+                                    <Pencil className="size-3.5 text-ink-muted" />
+                                  ) : (
+                                    <Lock className="size-3 text-ink-muted" />
+                                  )}
+                                </button>
+                                {hasRegionalPrice && (
+                                  <span className="font-sans text-[11px] font-medium text-ember">
+                                    Tarifa {selectedLocation.city} (Base:{" "}
+                                    {formatCurrency(
+                                      Number(product.global_base_price),
+                                      currencyCode
+                                    )}
+                                    )
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1140,563 +1648,729 @@ export function InteractiveDashboardConsole({
 
       {/* TAB 2: LIVE DIRECT ORDERS & COMMISSION-FREE DELIVERY CONSOLE */}
       {activeTab === "pedidos" && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-4 rounded-3xl border border-hairline bg-surface-accent/65 p-5 text-ink sm:grid-cols-3 sm:p-6">
-            <div className="sm:col-span-2">
-              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-ember">
-                Canal Propio 0% Comisión · Impacto Directo en Margen
-              </span>
-              <h2 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">
-                Bandeja de Domicilios & Pedidos Para Recoger
-              </h2>
-              <p className="mt-1 text-xs leading-relaxed text-ink-muted">
-                Cada pedido recibido aquí se registra en{" "}
-                <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs font-semibold text-ember">
-                  public.direct_orders
-                </code>{" "}
-                con medio de pago (Efectivo y vueltas exactas, Datáfono o
-                Transferencia) sin pagar el ~28% de comisión de plataformas
-                externas.
-              </p>
-            </div>
-            <div className="flex flex-col justify-center rounded-2xl border border-hairline bg-canvas px-4 py-3 text-right">
-              <span className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                Ahorro estimado en comisiones
-              </span>
-              <span className="tabular-price mt-0.5 font-mono text-2xl font-bold text-sage">
-                + {formatCurrency(estimatedCommissionSavings, currencyCode)}
-              </span>
-              <span className="text-xs text-ink-muted">
-                sobre {formatCurrency(totalDirectSalesAmount, currencyCode)} en
-                ventas directas
-              </span>
-            </div>
-          </div>
+        <>
+          {!capabilities.directOrdersEnabled ? (
+            <div className="rounded-3xl border border-border-strong bg-canvas-elevated p-6 sm:p-10">
+              <div className="mx-auto max-w-2xl text-center">
+                <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-surface-accent text-ember">
+                  <Crown className="size-6" />
+                </div>
+                <span className="mt-4 inline-block rounded-full border border-ember/30 bg-surface-accent px-3 py-1 text-xs font-bold tracking-wider text-ember uppercase">
+                  Incluido desde {PLAN_TIERS_META.standard.label}
+                </span>
+                <h2 className="mt-3 font-display text-3xl font-semibold text-ink sm:text-4xl">
+                  Motor Propio de Domicilios &amp; Recoger (0% Comisión)
+                </h2>
+                <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+                  El plan actual ({PLAN_TIERS_META[capabilities.planTier].shortLabel}
+                  {capabilities.isVitrineOnly ? " · Modo Vitrina" : ""}) no
+                  tiene activo el canal transaccional de domicilios. Al activar{" "}
+                  <strong>Plan Standard</strong> o <strong>Plan Full</strong>,
+                  el restaurante recibe pedidos directos con cálculo automático
+                  de envío, vueltas exactas en efectivo, datáfono y llaves
+                  Bre-B/Nequi por sede sin pagar el ~28% de apps externas.
+                </p>
 
-          <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5 sm:p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline pb-4">
-              <h3 className="font-display text-2xl font-semibold text-ink">
-                Órdenes Registradas ({directOrders.length})
-              </h3>
-              <Link
-                href={`/${restaurantSlug}/menu?modo=domicilio`}
-                className="inline-flex items-center gap-2 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
-              >
-                <Bike className="size-3.5" />
-                <span>Simular nuevo domicilio en la Carta →</span>
-              </Link>
-            </div>
-
-            {directOrders.length === 0 ? (
-              <p className="mt-5 rounded-2xl border border-dashed border-hairline bg-canvas p-6 text-center text-sm text-ink-muted">
-                Aún no hay pedidos directos registrados. Haz clic arriba en
-                &ldquo;Simular nuevo domicilio en la Carta&rdquo; para probar el
-                flujo completo.
-              </p>
-            ) : (
-              <div className="mt-5 grid grid-cols-1 gap-5">
-                {directOrders.map((order) => {
-                  const statusMeta =
-                    DIRECT_ORDER_STATUS_OPTIONS.find(
-                      (s) => s.value === order.status
-                    ) ?? DIRECT_ORDER_STATUS_OPTIONS[0]!;
-
-                  const paymentIcon =
-                    order.payment_method === "cash" ? (
-                      <Banknote className="size-4 text-sage" />
-                    ) : order.payment_method === "card_dataphone" ? (
-                      <CreditCard className="size-4 text-ember" />
-                    ) : (
-                      <Smartphone className="size-4 text-accent-ink" />
-                    );
-
-                  const paymentLabel =
-                    order.payment_method === "cash"
-                      ? "Efectivo"
-                      : order.payment_method === "card_dataphone"
-                        ? "Tarjeta / Datáfono"
-                        : "Transferencia";
-
-                  const statusUpdateWaMsg = [
-                    `Hola ${order.customer_name}, te escribimos de *${restaurantName}*.`,
-                    `Tu pedido *${order.reference_code}* por *${formatCurrency(
-                      Number(order.total_amount),
-                      currencyCode
-                    )}* se encuentra en estado: *${statusMeta.label}*.`,
-                    order.fulfillment_type === "delivery" &&
-                    order.delivery_address
-                      ? `Dirección registrada: ${order.delivery_address}${
-                          order.delivery_neighborhood
-                            ? ` (${order.delivery_neighborhood})`
-                            : ""
-                        }.`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join("\n");
-
-                  const customerWaHref = buildWhatsAppUrl(
-                    order.customer_phone,
-                    statusUpdateWaMsg
-                  );
-
-                  return (
-                    <article
-                      key={order.id}
-                      className="rounded-3xl border border-hairline bg-canvas p-5 transition hover:border-ember/40 sm:p-6"
+                <div className="mt-6 grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
+                  {PLAN_TIERS_META.standard.includedHighlights.map((item) => (
+                    <div
+                      key={item}
+                      className="flex items-start gap-2 rounded-2xl border border-hairline bg-canvas p-3.5 text-xs text-ink"
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-hairline pb-4">
-                        <div className="space-y-1.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-lg bg-ink px-2.5 py-1 font-mono text-xs font-bold text-ivory">
-                              {order.reference_code}
-                            </span>
-                            <span
-                              className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-xs font-semibold ${
-                                order.fulfillment_type === "delivery"
-                                  ? "bg-surface-accent text-ember"
-                                  : "bg-canvas-muted text-ink"
-                              }`}
-                            >
-                              {order.fulfillment_type === "delivery" ? (
-                                <>
-                                  <Bike className="size-3.5" />
-                                  <span>A Domicilio</span>
-                                </>
-                              ) : (
-                                <>
-                                  <ShoppingBag className="size-3.5" />
-                                  <span>Para Recoger</span>
-                                </>
-                              )}
-                            </span>
-                            <span
-                              className={`rounded-full border px-3 py-0.5 text-xs font-semibold ${statusMeta.badgeClass}`}
-                            >
-                              {statusMeta.label}
-                            </span>
-                          </div>
+                      <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-sage" />
+                      <span>{item}</span>
+                    </div>
+                  ))}
+                </div>
 
-                          <h4 className="font-display text-2xl font-semibold text-ink">
-                            {order.customer_name} ·{" "}
-                            <span className="font-mono text-sm font-normal text-ink-muted">
-                              {order.customer_phone}
-                            </span>
-                          </h4>
-                        </div>
+                <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => handleQuickSimPreset("standard")}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-full bg-ember px-5 py-2.5 text-xs font-semibold text-ivory shadow-xs transition hover:bg-ember-hover"
+                  >
+                    <Sparkles className="size-4" />
+                    <span>Simular Plan Standard en vivo</span>
+                  </button>
+                  <Link
+                    href="/super-admin"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border-strong bg-canvas px-5 py-2.5 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
+                  >
+                    <Layers className="size-4 text-ember" />
+                    <span>Activar permanentemente en /super-admin</span>
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 rounded-3xl border border-hairline bg-surface-accent/65 p-5 text-ink sm:grid-cols-3 sm:p-6">
+                <div className="sm:col-span-2">
+                  <span className="text-xs font-semibold uppercase tracking-[0.14em] text-ember">
+                    Canal Propio 0% Comisión ·{" "}
+                    {selectedLocation
+                      ? `Bandeja Aislada ${selectedLocation.city} (${selectedLocation.name})`
+                      : "Consolidado de Marca"}
+                  </span>
+                  <h2 className="mt-1 font-display text-2xl font-semibold text-ink sm:text-3xl">
+                    Bandeja de Domicilios &amp; Pedidos Para Recoger
+                  </h2>
+                  <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+                    Cada pedido recibido se valida en servidor (precios reales y
+                    tarifa de domicilio de la sede elegida) y se guarda en{" "}
+                    <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs font-semibold text-ember">
+                      public.direct_orders
+                    </code>{" "}
+                    sin pagar el ~28% de comisión de plataformas externas.
+                  </p>
+                </div>
+                <div className="flex flex-col justify-center rounded-2xl border border-hairline bg-canvas px-4 py-3 text-right">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                    Ahorro estimado en comisiones
+                  </span>
+                  <span className="tabular-price mt-0.5 font-mono text-2xl font-bold text-sage">
+                    +{" "}
+                    {formatCurrency(estimatedCommissionSavings, currencyCode)}
+                  </span>
+                  <span className="text-xs text-ink-muted">
+                    sobre {formatCurrency(totalDirectSalesAmount, currencyCode)}{" "}
+                    en ventas directas
+                  </span>
+                </div>
+              </div>
 
-                        <div className="rounded-2xl border border-hairline bg-canvas-elevated px-4 py-2 text-right">
-                          <span className="block text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                            Total Orden
-                          </span>
-                          <span className="tabular-price font-mono text-lg font-bold text-ink">
-                            {formatCurrency(
-                              Number(order.total_amount),
-                              currencyCode
-                            )}
-                          </span>
-                        </div>
-                      </div>
+              <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5 sm:p-6">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline pb-4">
+                  <h3 className="font-display text-2xl font-semibold text-ink">
+                    Órdenes Registradas ({directOrders.length})
+                  </h3>
+                  <Link
+                    href={appendSimPlanParam(
+                      selectedLocation
+                        ? `/${restaurantSlug}/menu?modo=domicilio&sede=${selectedLocation.slug}`
+                        : `/${restaurantSlug}/menu?modo=domicilio`
+                    )}
+                    className="inline-flex items-center gap-2 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
+                  >
+                    <Bike className="size-3.5" />
+                    <span>Simular nuevo domicilio en la Carta →</span>
+                  </Link>
+                </div>
 
-                      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-                        <div className="space-y-1.5 text-xs">
-                          <p className="font-semibold uppercase tracking-wider text-ink-muted">
-                            Platos Solicitados
-                          </p>
-                          <ul className="space-y-1">
-                            {(Array.isArray(order.items)
-                              ? order.items
-                              : []
-                            ).map((item, idx) => (
-                              <li
-                                key={`${order.id}-item-${idx}`}
-                                className="text-ink"
-                              >
-                                <strong>{item.quantity}x</strong> {item.name}
-                                {item.options && item.options.length > 0 && (
-                                  <span className="block text-xs text-ink-muted">
-                                    ({item.options.join(", ")})
+                {directOrders.length === 0 ? (
+                  <p className="mt-5 rounded-2xl border border-dashed border-hairline bg-canvas p-6 text-center text-sm text-ink-muted">
+                    No hay pedidos registrados en{" "}
+                    {selectedLocation ? selectedLocation.name : "esta bandeja"}.
+                    Haz clic arriba en &ldquo;Simular nuevo domicilio en la
+                    Carta&rdquo; para probar el flujo completo.
+                  </p>
+                ) : (
+                  <div className="mt-5 grid grid-cols-1 gap-5">
+                    {directOrders.map((order) => {
+                      const statusMeta =
+                        DIRECT_ORDER_STATUS_OPTIONS.find(
+                          (s) => s.value === order.status
+                        ) ?? DIRECT_ORDER_STATUS_OPTIONS[0]!;
+
+                      const paymentIcon =
+                        order.payment_method === "cash" ? (
+                          <Banknote className="size-4 text-sage" />
+                        ) : order.payment_method === "card_dataphone" ? (
+                          <CreditCard className="size-4 text-ember" />
+                        ) : (
+                          <Smartphone className="size-4 text-accent-ink" />
+                        );
+
+                      const paymentLabel =
+                        order.payment_method === "cash"
+                          ? "Efectivo"
+                          : order.payment_method === "card_dataphone"
+                            ? "Tarjeta / Datáfono"
+                            : "Transferencia";
+
+                      const statusUpdateWaMsg = [
+                        `Hola ${order.customer_name}, te escribimos de *${restaurantName}*${
+                          order.location_name ? ` (${order.location_name})` : ""
+                        }.`,
+                        `Tu pedido *${order.reference_code}* por *${formatCurrency(
+                          Number(order.total_amount),
+                          currencyCode
+                        )}* se encuentra en estado: *${statusMeta.label}*.`,
+                        order.fulfillment_type === "delivery" &&
+                        order.delivery_address
+                          ? `Dirección registrada: ${order.delivery_address}${
+                              order.delivery_neighborhood
+                                ? ` (${order.delivery_neighborhood})`
+                                : ""
+                            }.`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join("\n");
+
+                      const customerWaHref = buildWhatsAppUrl(
+                        order.customer_phone,
+                        statusUpdateWaMsg
+                      );
+
+                      return (
+                        <article
+                          key={order.id}
+                          className="rounded-3xl border border-hairline bg-canvas p-5 transition hover:border-ember/40 sm:p-6"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-hairline pb-4">
+                            <div className="space-y-1.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded-lg bg-ink px-2.5 py-1 font-mono text-xs font-bold text-ivory">
+                                  {order.reference_code}
+                                </span>
+                                {isMultiLocation && order.location_name && (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-ember/30 bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
+                                    <MapPin className="size-3" />
+                                    <span>
+                                      {order.location_city
+                                        ? `${order.location_city} · `
+                                        : ""}
+                                      {order.location_name}
+                                    </span>
                                   </span>
                                 )}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
+                                <span
+                                  className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-xs font-semibold ${
+                                    order.fulfillment_type === "delivery"
+                                      ? "bg-surface-accent text-ember"
+                                      : "bg-canvas-muted text-ink"
+                                  }`}
+                                >
+                                  {order.fulfillment_type === "delivery" ? (
+                                    <>
+                                      <Bike className="size-3.5" />
+                                      <span>A Domicilio</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ShoppingBag className="size-3.5" />
+                                      <span>Para Recoger</span>
+                                    </>
+                                  )}
+                                </span>
+                                <span
+                                  className={`rounded-full border px-3 py-0.5 text-xs font-semibold ${statusMeta.badgeClass}`}
+                                >
+                                  {statusMeta.label}
+                                </span>
+                              </div>
 
-                        <div className="space-y-1.5 text-xs">
-                          <p className="font-semibold uppercase tracking-wider text-ink-muted">
-                            Entrega & Medio de Pago
-                          </p>
-                          {isMultiLocation && order.location_name && (
-                            <p className="font-medium text-ink">
-                              📍 Sede: {order.location_name}
-                            </p>
-                          )}
-                          {order.fulfillment_type === "delivery" ? (
-                            <p className="text-ink">
-                              🏠 <strong>{order.delivery_address}</strong>
-                              {order.delivery_neighborhood
-                                ? ` · ${order.delivery_neighborhood}`
-                                : ""}
-                            </p>
-                          ) : (
-                            <p className="text-ink">
-                              🕒 Paso estimado:{" "}
-                              <strong>
-                                {order.pickup_slot ?? "Lo antes posible"}
-                              </strong>
-                            </p>
-                          )}
+                              <h4 className="font-display text-2xl font-semibold text-ink">
+                                {order.customer_name} ·{" "}
+                                <span className="font-mono text-sm font-normal text-ink-muted">
+                                  {order.customer_phone}
+                                </span>
+                              </h4>
+                            </div>
 
-                          <div className="mt-1 inline-flex items-center gap-1.5 rounded-xl border border-hairline bg-canvas-elevated px-2.5 py-1.5 font-medium text-ink">
-                            {paymentIcon}
-                            <span>
-                              {order.payment_details ?? paymentLabel}
-                            </span>
+                            <div className="rounded-2xl border border-hairline bg-canvas-elevated px-4 py-2 text-right">
+                              <span className="block text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                                Total Orden
+                              </span>
+                              <span className="tabular-price font-mono text-lg font-bold text-ink">
+                                {formatCurrency(
+                                  Number(order.total_amount),
+                                  currencyCode
+                                )}
+                              </span>
+                            </div>
                           </div>
 
-                          {order.delivery_notes && (
-                            <p className="rounded-xl bg-canvas-elevated p-2 text-ink-muted italic">
-                              &ldquo;{order.delivery_notes}&rdquo;
-                            </p>
-                          )}
-                        </div>
+                          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                            <div className="space-y-1.5 text-xs">
+                              <p className="font-semibold uppercase tracking-wider text-ink-muted">
+                                Platos Solicitados
+                              </p>
+                              <ul className="space-y-1">
+                                {(Array.isArray(order.items)
+                                  ? order.items
+                                  : []
+                                ).map((item, idx) => (
+                                  <li
+                                    key={`${order.id}-item-${idx}`}
+                                    className="text-ink"
+                                  >
+                                    <strong>{item.quantity}x</strong>{" "}
+                                    {item.name}
+                                    {item.options &&
+                                      item.options.length > 0 && (
+                                        <span className="block text-xs text-ink-muted">
+                                          ({item.options.join(", ")})
+                                        </span>
+                                      )}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
 
-                        <div className="space-y-2.5">
-                          <label className="block text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                            Estado en Cocina / Despacho
-                          </label>
-                          <select
-                            value={order.status}
-                            disabled={isPending}
-                            onChange={(e) =>
-                              handleUpdateDirectOrder(
-                                order,
-                                e.target
-                                  .value as OperationalDirectOrderItem["status"]
-                              )
-                            }
-                            aria-label={`Estado del pedido ${order.reference_code}`}
-                            className="h-10 w-full rounded-xl border border-border-strong bg-canvas-elevated px-3 text-xs font-semibold text-ink focus:border-ember focus:outline-none"
-                          >
-                            {DIRECT_ORDER_STATUS_OPTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
+                            <div className="space-y-1.5 text-xs">
+                              <p className="font-semibold uppercase tracking-wider text-ink-muted">
+                                Entrega &amp; Medio de Pago
+                              </p>
+                              {order.fulfillment_type === "delivery" ? (
+                                <p className="text-ink">
+                                  🏠 <strong>{order.delivery_address}</strong>
+                                  {order.delivery_neighborhood
+                                    ? ` · ${order.delivery_neighborhood}`
+                                    : ""}
+                                </p>
+                              ) : (
+                                <p className="text-ink">
+                                  🕒 Paso estimado:{" "}
+                                  <strong>
+                                    {order.pickup_slot ?? "Lo antes posible"}
+                                  </strong>
+                                </p>
+                              )}
 
-                          <a
-                            href={customerWaHref}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-full bg-ember px-3.5 py-2 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
-                          >
-                            <MessageCircle className="size-3.5" />
-                            <span>Avisar estado por WhatsApp</span>
-                          </a>
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
+                              <div className="mt-1 inline-flex items-center gap-1.5 rounded-xl border border-hairline bg-canvas-elevated px-2.5 py-1.5 font-medium text-ink">
+                                {paymentIcon}
+                                <span>
+                                  {order.payment_details ?? paymentLabel}
+                                </span>
+                              </div>
+
+                              {order.delivery_notes && (
+                                <p className="rounded-xl bg-canvas-elevated p-2 text-ink-muted italic">
+                                  &ldquo;{order.delivery_notes}&rdquo;
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="space-y-2.5">
+                              <label className="block text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                                Estado en Cocina / Despacho
+                              </label>
+                              <select
+                                value={order.status}
+                                disabled={isPending || isReadOnlyMutations}
+                                onChange={(e) =>
+                                  handleUpdateDirectOrder(
+                                    order,
+                                    e.target
+                                      .value as OperationalDirectOrderItem["status"]
+                                  )
+                                }
+                                aria-label={`Estado del pedido ${order.reference_code}`}
+                                className="h-10 w-full rounded-xl border border-border-strong bg-canvas-elevated px-3 text-xs font-semibold text-ink focus:border-ember focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {DIRECT_ORDER_STATUS_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <a
+                                href={customerWaHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-full bg-ember px-3.5 py-2 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
+                              >
+                                <MessageCircle className="size-3.5" />
+                                <span>Avisar estado por WhatsApp</span>
+                              </a>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* TAB 3: MINI-CRM DE SOLICITUDES DE EVENTOS */}
       {activeTab === "eventos" && (
-        <div className="space-y-6">
-          <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5 sm:p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline pb-4">
-              <div>
-                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-ember">
-                  Bandeja Comercial Aislada por Tenant (RLS)
+        <>
+          {!capabilities.eventsEnabled ? (
+            <div className="rounded-3xl border border-border-strong bg-canvas-elevated p-6 sm:p-10">
+              <div className="mx-auto max-w-2xl text-center">
+                <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-surface-accent text-ember">
+                  <CalendarCheck className="size-6" />
+                </div>
+                <span className="mt-4 inline-block rounded-full border border-ember/30 bg-surface-accent px-3 py-1 text-xs font-bold tracking-wider text-ember uppercase">
+                  Exclusivo {PLAN_TIERS_META.full.label}
                 </span>
-                <h2 className="font-display text-2xl font-semibold text-ink sm:text-3xl">
-                  Solicitudes de Eventos & Celebraciones ({inquiries.length})
+                <h2 className="mt-3 font-display text-3xl font-semibold text-ink sm:text-4xl">
+                  Dossier de Salones Privados &amp; Mini-CRM de Eventos
                 </h2>
-              </div>
-              <Link
-                href={`/${restaurantSlug}/eventos#solicitud-cotizacion-eventos`}
-                className="inline-flex items-center gap-2 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
-              >
-                <CalendarCheck className="size-3.5" />
-                <span>Crear nueva solicitud de prueba →</span>
-              </Link>
-            </div>
+                <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+                  Convierte reservas grupales, cenas corporativas y celebraciones
+                  con galería de salones por ciudad, paquetes gastronómicos por
+                  persona, calculadora de presupuesto referencial y seguimiento
+                  comercial aislado por sede.
+                </p>
 
-            {inquiries.length === 0 ? (
-              <p className="mt-5 rounded-2xl border border-dashed border-hairline bg-canvas p-6 text-center text-sm text-ink-muted">
-                Aún no hay solicitudes de eventos registradas. Haz clic arriba
-                en &ldquo;Crear nueva solicitud de prueba&rdquo; para probar el
-                cotizador.
-              </p>
-            ) : (
-              <div className="mt-5 grid grid-cols-1 gap-5">
-                {inquiries.map((inq) => {
-                  const statusMeta =
-                    INQUIRY_STATUS_OPTIONS.find(
-                      (s) => s.value === inq.status
-                    ) ?? INQUIRY_STATUS_OPTIONS[0]!;
-                  const estimatedBudget =
-                    inq.package_base_price && inq.guest_count
-                      ? Number(inq.package_base_price) * inq.guest_count
-                      : null;
-
-                  const coordinatorWaMessage = [
-                    `Hola ${inq.customer_name}, te saludamos del equipo de Eventos y Hospitalidad de *${restaurantName}*.`,
-                    `Recibimos tu solicitud con código *${inq.reference_code}* para tu *${inq.event_type}* (${inq.guest_count} invitados, fecha tentativa ${inq.tentative_date}).`,
-                    inq.event_space_name
-                      ? `Espacio solicitado: ${inq.event_space_name}${
-                          isMultiLocation && inq.location_name
-                            ? ` (${inq.location_name})`
-                            : ""
-                        }.`
-                      : null,
-                    estimatedBudget
-                      ? `Presupuesto base estimado según la experiencia elegida: ${formatCurrency(
-                          estimatedBudget,
-                          currencyCode
-                        )}.`
-                      : null,
-                    `¿Tienes unos minutos para confirmar los detalles del montaje y enviarte la propuesta formal?`,
-                  ]
-                    .filter(Boolean)
-                    .join("\n");
-
-                  const clientWhatsAppHref = buildWhatsAppUrl(
-                    inq.customer_phone,
-                    coordinatorWaMessage
-                  );
-
-                  return (
-                    <article
-                      key={inq.id}
-                      className="rounded-3xl border border-hairline bg-canvas p-5 transition hover:border-ember/40 sm:p-6"
+                <div className="mt-6 grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
+                  {PLAN_TIERS_META.full.includedHighlights.map((item) => (
+                    <div
+                      key={item}
+                      className="flex items-start gap-2 rounded-2xl border border-hairline bg-canvas p-3.5 text-xs text-ink"
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-hairline pb-4">
+                      <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-sage" />
+                      <span>{item}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => handleQuickSimPreset("full")}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-full bg-ember px-5 py-2.5 text-xs font-semibold text-ivory shadow-xs transition hover:bg-ember-hover"
+                  >
+                    <Sparkles className="size-4" />
+                    <span>Simular Plan Full en vivo</span>
+                  </button>
+                  <Link
+                    href="/super-admin"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border-strong bg-canvas px-5 py-2.5 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
+                  >
+                    <Layers className="size-4 text-ember" />
+                    <span>Activar permanentemente en /super-admin</span>
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="rounded-3xl border border-hairline bg-canvas-elevated p-5 sm:p-6">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-hairline pb-4">
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-[0.14em] text-ember">
+                      {selectedLocation
+                        ? `Bandeja Eventos Aislada · ${selectedLocation.city} (${selectedLocation.name})`
+                        : "Bandeja Comercial Aislada por Tenant (RLS)"}
+                    </span>
+                    <h2 className="font-display text-2xl font-semibold text-ink sm:text-3xl">
+                      Solicitudes de Eventos &amp; Celebraciones (
+                      {inquiries.length})
+                    </h2>
+                  </div>
+                  <Link
+                    href={appendSimPlanParam(
+                      selectedLocation
+                        ? `/${restaurantSlug}/eventos?sede=${selectedLocation.slug}#solicitud-cotizacion-eventos`
+                        : `/${restaurantSlug}/eventos#solicitud-cotizacion-eventos`
+                    )}
+                    className="inline-flex items-center gap-2 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
+                  >
+                    <CalendarCheck className="size-3.5" />
+                    <span>Crear nueva solicitud de prueba →</span>
+                  </Link>
+                </div>
+
+                {inquiries.length === 0 ? (
+                  <p className="mt-5 rounded-2xl border border-dashed border-hairline bg-canvas p-6 text-center text-sm text-ink-muted">
+                    Aún no hay solicitudes de eventos registradas para{" "}
+                    {selectedLocation ? selectedLocation.name : "este filtro"}.
+                    Haz clic arriba en &ldquo;Crear nueva solicitud de
+                    prueba&rdquo; para probar el cotizador.
+                  </p>
+                ) : (
+                  <div className="mt-5 grid grid-cols-1 gap-5">
+                    {inquiries.map((inq) => {
+                      const statusMeta =
+                        INQUIRY_STATUS_OPTIONS.find(
+                          (s) => s.value === inq.status
+                        ) ?? INQUIRY_STATUS_OPTIONS[0]!;
+                      const estimatedBudget =
+                        inq.package_base_price && inq.guest_count
+                          ? Number(inq.package_base_price) * inq.guest_count
+                          : null;
+
+                      const coordinatorWaMessage = [
+                        `Hola ${inq.customer_name}, te saludamos del equipo de Eventos y Hospitalidad de *${restaurantName}*${
+                          inq.location_name ? ` (${inq.location_name})` : ""
+                        }.`,
+                        `Recibimos tu solicitud con código *${inq.reference_code}* para tu *${inq.event_type}* (${inq.guest_count} invitados, fecha tentativa ${inq.tentative_date}).`,
+                        inq.event_space_name
+                          ? `Espacio solicitado: ${inq.event_space_name}${
+                              isMultiLocation && inq.location_name
+                                ? ` (${inq.location_city ? `${inq.location_city} · ` : ""}${inq.location_name})`
+                                : ""
+                            }.`
+                          : null,
+                        estimatedBudget
+                          ? `Presupuesto base estimado según la experiencia elegida: ${formatCurrency(
+                              estimatedBudget,
+                              currencyCode
+                            )}.`
+                          : null,
+                        `¿Tienes unos minutos para confirmar los detalles del montaje y enviarte la propuesta formal?`,
+                      ]
+                        .filter(Boolean)
+                        .join("\n");
+
+                      const clientWhatsAppHref = buildWhatsAppUrl(
+                        inq.customer_phone,
+                        coordinatorWaMessage
+                      );
+
+                      return (
+                        <article
+                          key={inq.id}
+                          className="rounded-3xl border border-hairline bg-canvas p-5 transition hover:border-ember/40 sm:p-6"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-hairline pb-4">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded-lg bg-ink px-2.5 py-1 font-mono text-xs font-bold text-ivory">
+                                  {inq.reference_code}
+                                </span>
+                                {isMultiLocation && inq.location_name && (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-ember/30 bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
+                                    <MapPin className="size-3" />
+                                    <span>
+                                      {inq.location_city
+                                        ? `${inq.location_city} · `
+                                        : ""}
+                                      {inq.location_name}
+                                    </span>
+                                  </span>
+                                )}
+                                <span
+                                  className={`rounded-full border px-3 py-0.5 text-xs font-semibold ${statusMeta.badgeClass}`}
+                                >
+                                  {statusMeta.label}
+                                </span>
+                                <span className="text-xs text-ink-muted">
+                                  Fecha tentativa:{" "}
+                                  <strong className="font-semibold text-ink">
+                                    {inq.tentative_date}
+                                  </strong>{" "}
+                                  ·{" "}
+                                  {TIME_SLOT_LABELS[
+                                    inq.preferred_time_slot as keyof typeof TIME_SLOT_LABELS
+                                  ] ?? inq.preferred_time_slot}
+                                </span>
+                              </div>
+
+                              <h3 className="mt-2 font-display text-2xl font-semibold text-ink">
+                                {inq.event_type} · {inq.guest_count} invitados
+                              </h3>
+                            </div>
+
+                            {estimatedBudget && (
+                              <div className="rounded-2xl border border-hairline bg-canvas-elevated px-4 py-2 text-right">
+                                <span className="block text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                                  Valor Estimado Paquete
+                                </span>
+                                <span className="tabular-price font-mono text-lg font-bold text-ember">
+                                  {formatCurrency(
+                                    estimatedBudget,
+                                    currencyCode
+                                  )}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                            <div className="space-y-1 text-xs">
+                              <p className="font-semibold uppercase tracking-wider text-ink-muted">
+                                Datos del Cliente
+                              </p>
+                              <p className="text-sm font-semibold text-ink">
+                                {inq.customer_name}
+                              </p>
+                              {inq.company_name && (
+                                <p className="flex items-center gap-1 text-ink-muted">
+                                  <Building2 className="size-3.5 text-ember" />
+                                  <span>{inq.company_name}</span>
+                                </p>
+                              )}
+                              <p className="font-mono text-ink-muted">
+                                Tel: {inq.customer_phone}
+                              </p>
+                              {inq.customer_email && (
+                                <p className="text-ink-muted">
+                                  {inq.customer_email}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="space-y-1 text-xs">
+                              <p className="font-semibold uppercase tracking-wider text-ink-muted">
+                                {isMultiLocation
+                                  ? "Ciudad, Sede & Salón"
+                                  : "Salón & Experiencia"}
+                              </p>
+                              {isMultiLocation && (
+                                <p className="font-medium text-ink">
+                                  📍{" "}
+                                  {inq.location_city
+                                    ? `${inq.location_city} · `
+                                    : ""}
+                                  {inq.location_name ?? "Sede por definir"}
+                                </p>
+                              )}
+                              <p className="text-ink-muted">
+                                🏛️ Salón:{" "}
+                                <strong className="font-semibold text-ink">
+                                  {inq.event_space_name ??
+                                    "A sugerir por capacidad"}
+                                </strong>
+                              </p>
+                              <p className="text-ink-muted">
+                                🍷 Experiencia:{" "}
+                                <strong className="font-semibold text-ink">
+                                  {inq.event_package_name ??
+                                    "Cotización a medida"}
+                                </strong>
+                              </p>
+                              {inq.special_requests && (
+                                <p className="mt-1.5 rounded-xl bg-canvas-elevated p-2.5 text-ink-muted italic">
+                                  &ldquo;{inq.special_requests}&rdquo;
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="space-y-2.5">
+                              <label className="block text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                                Estado Comercial &amp; Notas Internas
+                              </label>
+                              <select
+                                value={inq.status}
+                                disabled={isPending || isReadOnlyMutations}
+                                aria-label={`Estado comercial de ${inq.reference_code}`}
+                                onChange={(e) =>
+                                  handleUpdateInquiry(
+                                    inq,
+                                    e.target
+                                      .value as OperationalInquiryItem["status"]
+                                  )
+                                }
+                                className="h-10 w-full rounded-xl border border-border-strong bg-canvas-elevated px-3 text-xs font-semibold text-ink focus:border-ember focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {INQUIRY_STATUS_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+
+                              <textarea
+                                rows={2}
+                                disabled={isReadOnlyMutations}
+                                value={inquiryNotesDraft[inq.id] ?? ""}
+                                onChange={(e) =>
+                                  setInquiryNotesDraft((prev) => ({
+                                    ...prev,
+                                    [inq.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder="Notas de coordinación (ej. se envió PDF, requiere anticipo)..."
+                                className="w-full rounded-xl border border-border-strong bg-canvas-elevated p-2.5 text-xs text-ink placeholder:text-ink-subtle focus:border-ember focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={isPending || isReadOnlyMutations}
+                                  onClick={() =>
+                                    handleUpdateInquiry(inq, inq.status)
+                                  }
+                                  className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3.5 py-1.5 text-xs font-semibold text-ivory transition hover:bg-ember disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  <Save className="size-3.5" />
+                                  <span>Guardar nota</span>
+                                </button>
+
+                                <a
+                                  href={clientWhatsAppHref}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 rounded-full bg-ember px-3.5 py-1.5 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
+                                >
+                                  <MessageCircle className="size-3.5" />
+                                  <span>Responder por WhatsApp</span>
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Configured Spaces & Packages Overview */}
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <div className="rounded-3xl border border-hairline bg-canvas-elevated p-6">
+                  <h3 className="font-display text-2xl font-semibold text-ink">
+                    {selectedLocation
+                      ? `Salones en ${selectedLocation.name} (${eventSpaces.length})`
+                      : `Salones Activos (${eventSpaces.length})`}
+                  </h3>
+                  <div className="mt-4 space-y-3">
+                    {eventSpaces.map((space) => (
+                      <div
+                        key={space.id}
+                        className="flex items-center justify-between gap-3 rounded-2xl border border-hairline bg-canvas p-3.5"
+                      >
                         <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="rounded-lg bg-ink px-2.5 py-1 font-mono text-xs font-bold text-ivory">
-                              {inq.reference_code}
-                            </span>
-                            <span
-                              className={`rounded-full border px-3 py-0.5 text-xs font-semibold ${statusMeta.badgeClass}`}
-                            >
-                              {statusMeta.label}
-                            </span>
-                            <span className="text-xs text-ink-muted">
-                              Fecha tentativa:{" "}
-                              <strong className="font-semibold text-ink">
-                                {inq.tentative_date}
-                              </strong>{" "}
-                              ·{" "}
-                              {TIME_SLOT_LABELS[
-                                inq.preferred_time_slot as keyof typeof TIME_SLOT_LABELS
-                              ] ?? inq.preferred_time_slot}
-                            </span>
-                          </div>
-
-                          <h3 className="mt-2 font-display text-2xl font-semibold text-ink">
-                            {inq.event_type} · {inq.guest_count} invitados
-                          </h3>
+                          <p className="font-semibold text-ink">{space.name}</p>
+                          <p className="text-xs text-ink-muted">
+                            {space.subtitle}
+                          </p>
                         </div>
-
-                        {estimatedBudget && (
-                          <div className="rounded-2xl border border-hairline bg-canvas-elevated px-4 py-2 text-right">
-                            <span className="block text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                              Valor Estimado Paquete
-                            </span>
-                            <span className="tabular-price font-mono text-lg font-bold text-ember">
-                              {formatCurrency(estimatedBudget, currencyCode)}
-                            </span>
-                          </div>
-                        )}
+                        <span className="inline-flex items-center gap-1 rounded-full bg-canvas-muted px-3 py-1 text-xs font-medium text-ink">
+                          <Users className="size-3.5 text-ember" />
+                          <span>
+                            {space.min_guests}–{space.capacity_seated} pax
+                          </span>
+                        </span>
                       </div>
-
-                      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-                        <div className="space-y-1 text-xs">
-                          <p className="font-semibold uppercase tracking-wider text-ink-muted">
-                            Datos del Cliente
-                          </p>
-                          <p className="text-sm font-semibold text-ink">
-                            {inq.customer_name}
-                          </p>
-                          {inq.company_name && (
-                            <p className="flex items-center gap-1 text-ink-muted">
-                              <Building2 className="size-3.5 text-ember" />
-                              <span>{inq.company_name}</span>
-                            </p>
-                          )}
-                          <p className="font-mono text-ink-muted">
-                            Tel: {inq.customer_phone}
-                          </p>
-                          {inq.customer_email && (
-                            <p className="text-ink-muted">
-                              {inq.customer_email}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="space-y-1 text-xs">
-                          <p className="font-semibold uppercase tracking-wider text-ink-muted">
-                            {isMultiLocation
-                              ? "Sede, Salón & Experiencia"
-                              : "Salón & Experiencia"}
-                          </p>
-                          {isMultiLocation && (
-                            <p className="font-medium text-ink">
-                              📍 {inq.location_name ?? "Sede por definir"}
-                            </p>
-                          )}
-                          <p className="text-ink-muted">
-                            🏛️ Salón:{" "}
-                            <strong className="font-semibold text-ink">
-                              {inq.event_space_name ?? "A sugerir por capacidad"}
-                            </strong>
-                          </p>
-                          <p className="text-ink-muted">
-                            🍷 Experiencia:{" "}
-                            <strong className="font-semibold text-ink">
-                              {inq.event_package_name ?? "Cotización a medida"}
-                            </strong>
-                          </p>
-                          {inq.special_requests && (
-                            <p className="mt-1.5 rounded-xl bg-canvas-elevated p-2.5 text-ink-muted italic">
-                              &ldquo;{inq.special_requests}&rdquo;
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="space-y-2.5">
-                          <label className="block text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                            Estado Comercial & Notas Internas
-                          </label>
-                          <select
-                            value={inq.status}
-                            disabled={isPending}
-                            aria-label={`Estado comercial de ${inq.reference_code}`}
-                            onChange={(e) =>
-                              handleUpdateInquiry(
-                                inq,
-                                e.target
-                                  .value as OperationalInquiryItem["status"]
-                              )
-                            }
-                            className="h-10 w-full rounded-xl border border-border-strong bg-canvas-elevated px-3 text-xs font-semibold text-ink focus:border-ember focus:outline-none"
-                          >
-                            {INQUIRY_STATUS_OPTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-
-                          <textarea
-                            rows={2}
-                            value={inquiryNotesDraft[inq.id] ?? ""}
-                            onChange={(e) =>
-                              setInquiryNotesDraft((prev) => ({
-                                ...prev,
-                                [inq.id]: e.target.value,
-                              }))
-                            }
-                            placeholder="Notas de coordinación (ej. se envió PDF, requiere anticipo)..."
-                            className="w-full rounded-xl border border-border-strong bg-canvas-elevated p-2.5 text-xs text-ink placeholder:text-ink-subtle focus:border-ember focus:outline-none"
-                          />
-
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              disabled={isPending}
-                              onClick={() =>
-                                handleUpdateInquiry(inq, inq.status)
-                              }
-                              className="inline-flex items-center gap-1.5 rounded-full bg-ink px-3.5 py-1.5 text-xs font-semibold text-ivory transition hover:bg-ember"
-                            >
-                              <Save className="size-3.5" />
-                              <span>Guardar nota</span>
-                            </button>
-
-                            <a
-                              href={clientWhatsAppHref}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 rounded-full bg-ember px-3.5 py-1.5 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
-                            >
-                              <MessageCircle className="size-3.5" />
-                              <span>Responder por WhatsApp</span>
-                            </a>
-                          </div>
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Configured Spaces & Packages Overview */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="rounded-3xl border border-hairline bg-canvas-elevated p-6">
-              <h3 className="font-display text-2xl font-semibold text-ink">
-                Salones Activos ({eventSpaces.length})
-              </h3>
-              <div className="mt-4 space-y-3">
-                {eventSpaces.map((space) => (
-                  <div
-                    key={space.id}
-                    className="flex items-center justify-between gap-3 rounded-2xl border border-hairline bg-canvas p-3.5"
-                  >
-                    <div>
-                      <p className="font-semibold text-ink">{space.name}</p>
-                      <p className="text-xs text-ink-muted">{space.subtitle}</p>
-                    </div>
-                    <span className="inline-flex items-center gap-1 rounded-full bg-canvas-muted px-3 py-1 text-xs font-medium text-ink">
-                      <Users className="size-3.5 text-ember" />
-                      <span>
-                        {space.min_guests}–{space.capacity_seated} pax
-                      </span>
-                    </span>
+                    ))}
                   </div>
-                ))}
+                </div>
+
+                <div className="rounded-3xl border border-hairline bg-canvas-elevated p-6">
+                  <h3 className="font-display text-2xl font-semibold text-ink">
+                    Paquetes de Experiencias ({eventPackages.length})
+                  </h3>
+                  <div className="mt-4 space-y-3">
+                    {eventPackages.map((pkg) => (
+                      <div
+                        key={pkg.id}
+                        className="flex items-center justify-between gap-3 rounded-2xl border border-hairline bg-canvas p-3.5"
+                      >
+                        <div>
+                          <p className="font-semibold text-ink">{pkg.name}</p>
+                          <p className="text-xs text-ink-muted">
+                            {pkg.min_guests} a {pkg.max_guests ?? 95} invitados
+                          </p>
+                        </div>
+                        <span className="tabular-price font-mono text-sm font-semibold text-ember">
+                          {pkg.base_price
+                            ? `${formatCurrency(
+                                Number(pkg.base_price),
+                                currencyCode
+                              )} / pax`
+                            : "A medida"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
-
-            <div className="rounded-3xl border border-hairline bg-canvas-elevated p-6">
-              <h3 className="font-display text-2xl font-semibold text-ink">
-                Paquetes de Experiencias ({eventPackages.length})
-              </h3>
-              <div className="mt-4 space-y-3">
-                {eventPackages.map((pkg) => (
-                  <div
-                    key={pkg.id}
-                    className="flex items-center justify-between gap-3 rounded-2xl border border-hairline bg-canvas p-3.5"
-                  >
-                    <div>
-                      <p className="font-semibold text-ink">{pkg.name}</p>
-                      <p className="text-xs text-ink-muted">
-                        {pkg.min_guests} a {pkg.max_guests ?? 95} invitados
-                      </p>
-                    </div>
-                    <span className="tabular-price font-mono text-sm font-semibold text-ember">
-                      {pkg.base_price
-                        ? `${formatCurrency(
-                            Number(pkg.base_price),
-                            currencyCode
-                          )} / pax`
-                        : "A medida"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+          )}
+        </>
       )}
 
       {/* TAB 4: REAL ISO/IEC 18004 SCANNABLE QR GENERATOR PER LOCATION & CHANNEL */}
@@ -1704,22 +2378,23 @@ export function InteractiveDashboardConsole({
         <div className="rounded-3xl border border-hairline bg-canvas-elevated p-6">
           <div className="max-w-3xl">
             <span className="text-xs font-semibold uppercase tracking-[0.14em] text-ember">
-              Kit de Mesa, Redes Sociales & Empaques (ISO/IEC 18004)
+              Kit de Mesa, Redes Sociales &amp; Empaques (ISO/IEC 18004)
             </span>
             <h2 className="mt-1 font-display text-3xl font-semibold text-ink">
-              Generador de Códigos QR Contextuales Escaneables
+              {selectedLocation
+                ? `Códigos QR Escaneables · ${selectedLocation.city} (${selectedLocation.name})`
+                : "Generador de Códigos QR Contextuales Escaneables"}
             </h2>
             <p className="mt-1 text-sm text-ink-muted">
               Los QRs de mesa usan{" "}
               <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs font-semibold text-ember">
                 ?sede=...&amp;mesa=...
               </code>{" "}
-              para abrir la carta limpia en Modo Mesa, mientras el QR de
-              domicilios usa{" "}
-              <code className="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs font-semibold text-ember">
-                ?modo=domicilio
-              </code>{" "}
-              para activar el checkout directo de inmediato.
+              para abrir la carta pre-filtrada en la sede exacta
+              {capabilities.isSimulated
+                ? ` (incluyendo ?plan=${capabilities.simPreset} para previsualizar esta simulación desde tu celular)`
+                : ""}
+              .
             </p>
           </div>
 
@@ -1760,7 +2435,7 @@ export function InteractiveDashboardConsole({
                     </span>
                   </div>
 
-                  <div className="flex-1 space-y-2.5">
+                  <div className="min-w-0 flex-1 space-y-2.5">
                     <span className="inline-block rounded-full bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
                       {target.badge}
                     </span>
@@ -1770,7 +2445,7 @@ export function InteractiveDashboardConsole({
                     <p className="text-xs leading-relaxed text-ink-muted">
                       {target.subtitle}
                     </p>
-                    <p className="rounded-xl border border-hairline bg-canvas-elevated px-3 py-1.5 font-mono text-xs text-ink">
+                    <p className="truncate rounded-xl border border-hairline bg-canvas-elevated px-3 py-1.5 font-mono text-xs text-ink">
                       {target.relativeUrl}
                     </p>
 
@@ -1827,21 +2502,19 @@ export function InteractiveDashboardConsole({
             <History className="size-4 text-ember" />
             <h3 className="font-display text-xl font-semibold">
               Bitácora Forense de Cambios en Tiempo Real (
-              <code className="font-mono text-base text-ember">
-                audit_logs
-              </code>
+              <code className="font-mono text-base text-ember">audit_logs</code>
               )
             </h3>
           </div>
           <p className="mt-1 text-xs text-ink-muted">
-            Cada cambio de disponibilidad, precio, pedido directo o cotización
-            queda registrado con su estado anterior y nuevo.
+            Cada cambio de disponibilidad regional o global, precio, pedido
+            directo, cotización o plan SaaS queda registrado con trazabilidad.
           </p>
 
           {auditLogs.length === 0 ? (
             <p className="mt-4 rounded-2xl border border-dashed border-hairline bg-canvas p-4 text-xs text-ink-muted">
-              Aún no hay cambios registrados en esta sesión. Prueba cambiando un
-              plato, el estado de un domicilio o una solicitud de evento arriba.
+              Aún no hay cambios registrados en esta vista. Prueba cambiando un
+              plato, el estado de un domicilio o una solicitud arriba.
             </p>
           ) : (
             <div className="mt-4 max-h-60 space-y-2.5 overflow-y-auto pr-1">
@@ -1850,11 +2523,18 @@ export function InteractiveDashboardConsole({
                   key={log.id}
                   className="flex items-start justify-between gap-3 rounded-2xl border border-hairline bg-canvas px-4 py-2.5 text-xs"
                 >
-                  <div>
-                    <span className="font-mono font-semibold text-ember">
-                      {log.action}
-                    </span>
-                    <p className="mt-0.5 text-ink-muted">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono font-semibold text-ember">
+                        {log.action}
+                      </span>
+                      {log.location_name && (
+                        <span className="rounded-full bg-surface-accent px-2 py-0.5 text-[11px] font-semibold text-ember">
+                          {log.location_name}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 break-words text-ink-muted">
                       {log.previous_state && log.new_state
                         ? `${JSON.stringify(
                             log.previous_state
@@ -1879,29 +2559,21 @@ export function InteractiveDashboardConsole({
             <div className="flex items-center gap-2 text-ember">
               <ShieldCheck className="size-5 text-sage" />
               <span className="text-xs font-semibold uppercase tracking-[0.14em]">
-                Arquitectura Segura Multi-Tenant
+                Arquitectura Comercial &amp; Multi-Sede
               </span>
             </div>
             <h3 className="mt-2 font-display text-2xl font-semibold text-ink">
-              Aislamiento PostgreSQL RLS + RPC Transaccional
+              Aislamiento PostgreSQL RLS + Gobernanza de Planes
             </h3>
             <p className="mt-2 text-xs leading-relaxed text-ink-muted">
-              Las tablas públicas mantienen{" "}
+              Las tablas mantienen{" "}
               <code className="rounded bg-canvas px-1 py-0.5 font-mono font-semibold text-ember">
                 FORCE ROW LEVEL SECURITY
               </code>{" "}
-              contra accesos anónimos directos (cero exposición de PII en{" "}
+              y validan en servidor tanto el aislamiento por sede como el estado
+              de suscripción en{" "}
               <code className="rounded bg-canvas px-1 py-0.5 font-mono font-semibold text-ember">
-                event_inquiries
-              </code>{" "}
-              y{" "}
-              <code className="rounded bg-canvas px-1 py-0.5 font-mono font-semibold text-ember">
-                direct_orders
-              </code>
-              ), mientras las acciones operativas pasan por funciones validadas
-              con trazabilidad en{" "}
-              <code className="rounded bg-canvas px-1 py-0.5 font-mono font-semibold text-ember">
-                public.audit_logs
+                public.restaurant_entitlements
               </code>
               .
             </p>
@@ -1916,7 +2588,7 @@ export function InteractiveDashboardConsole({
                   : "border border-border-strong bg-canvas text-ink hover:border-ember hover:text-ember"
               }`}
             >
-              Consola Casa Brasa (2 Sedes)
+              Casa Brasa (3 Sedes · 2 Ciudades)
             </Link>
             <Link
               href="/dashboard/botanica-brunch"
@@ -1926,7 +2598,13 @@ export function InteractiveDashboardConsole({
                   : "border border-border-strong bg-canvas text-ink hover:border-ember hover:text-ember"
               }`}
             >
-              Consola Botánica (1 Sola Sede)
+              Botánica (1 Sede)
+            </Link>
+            <Link
+              href="/super-admin"
+              className="rounded-full border border-border-strong bg-obsidian px-3.5 py-1.5 text-xs font-semibold text-gold transition hover:border-gold"
+            >
+              /super-admin
             </Link>
           </div>
         </div>

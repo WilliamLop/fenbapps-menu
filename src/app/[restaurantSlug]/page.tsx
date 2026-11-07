@@ -8,11 +8,18 @@ import {
   Camera,
   Users,
   ArrowRight,
+  ShieldAlert,
+  Layers,
 } from "lucide-react";
-import { getRestaurantBySlug } from "@/modules/tenant/queries";
+import {
+  getRestaurantBySlug,
+  getRequestEffectiveCapabilities,
+  resolveEffectiveLocations,
+} from "@/modules/tenant/queries";
 import { RestaurantNavbar } from "@/components/public/restaurant-navbar";
 import { RestaurantFooter } from "@/components/public/restaurant-footer";
 import { LocationsShowcase } from "@/components/public/locations-showcase";
+import { LivePlanSimulator } from "@/components/public/live-plan-simulator";
 import {
   formatCurrency,
   getAdaptiveThreeColumnGrid,
@@ -20,6 +27,7 @@ import {
 
 interface RestaurantPageProps {
   params: Promise<{ restaurantSlug: string }>;
+  searchParams: Promise<{ plan?: string }>;
 }
 
 export async function generateMetadata({
@@ -45,23 +53,79 @@ export async function generateMetadata({
 
 export default async function RestaurantCommercialPage({
   params,
+  searchParams,
 }: RestaurantPageProps) {
-  const { restaurantSlug } = await params;
+  const [{ restaurantSlug }, resolvedSearch] = await Promise.all([
+    params,
+    searchParams,
+  ]);
   const data = await getRestaurantBySlug(restaurantSlug);
 
   if (!data) {
     notFound();
   }
 
-  const {
-    restaurant,
-    theme,
-    contact,
-    enabledModules,
-    locations,
-    featuredProducts,
-    eventSpaces,
-  } = data;
+  const caps = await getRequestEffectiveCapabilities(data, resolvedSearch.plan);
+  const locations = resolveEffectiveLocations(data, caps);
+  const visibleLocationIds = new Set(locations.map((l) => l.id));
+
+  const enabledModules = {
+    site: caps.siteEnabled,
+    menu: caps.menuVitrineEnabled,
+    events: caps.eventsEnabled,
+  };
+
+  const { restaurant, theme, contact, featuredProducts } = data;
+  const eventSpaces = data.eventSpaces.filter(
+    (sp) => !sp.location_id || visibleLocationIds.has(sp.location_id)
+  );
+  const cities = Array.from(
+    new Set(locations.map((l) => (l.city || "Bogotá").trim()))
+  );
+
+  if (caps.isSuspended) {
+    return (
+      <div
+        data-theme={theme.palette}
+        className="min-h-screen flex flex-col items-center justify-center bg-canvas px-4 py-16 text-center text-ink"
+      >
+        <div className="max-w-lg rounded-3xl border border-hairline bg-canvas-elevated p-8 shadow-lg sm:p-10">
+          <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-surface-accent text-ember">
+            <ShieldAlert className="size-6" />
+          </div>
+          <h1 className="mt-4 font-display text-3xl font-semibold text-ink">
+            {restaurant.name}
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+            Nuestra experiencia digital se encuentra temporalmente en pausa
+            operativa. Para reservas o atención inmediata, comunícate con
+            nuestro equipo directo.
+          </p>
+          {restaurant.is_demo && (
+            <div className="mt-6 border-t border-hairline pt-5">
+              <Link
+                href="/super-admin"
+                className="inline-flex items-center gap-2 rounded-full bg-obsidian px-5 py-2.5 text-xs font-semibold text-gold transition hover:bg-ink"
+              >
+                <Layers className="size-4" />
+                <span>Reactivar suscripción en /super-admin</span>
+              </Link>
+            </div>
+          )}
+        </div>
+
+        <LivePlanSimulator
+          restaurantSlug={restaurant.slug}
+          restaurantName={restaurant.name}
+          isDemo={restaurant.is_demo}
+          activeSimPreset={caps.simPreset}
+          realPlanTier={data.entitlements.planTier}
+          realDesignTier={data.entitlements.designTier}
+          realSubscriptionStatus={data.entitlements.subscriptionStatus}
+        />
+      </div>
+    );
+  }
 
   const isSunlitHero = theme.heroStyle === "sunlit-editorial";
   const featuredSlice = featuredProducts.slice(0, 3);
@@ -192,15 +256,19 @@ export default async function RestaurantCommercialPage({
                   >
                     {locations.length === 1
                       ? "Casa Única"
+                      : cities.length > 1
+                      ? `${locations.length} Sedes · ${cities.length} Ciudades`
                       : `${locations.length} Sedes`}
                   </span>
                   <span className="mt-0.5 block">
-                    {locations
-                      .map(
-                        (l) =>
-                          l.neighborhood?.split("·")[0]?.trim() || l.name
-                      )
-                      .join(" & ")}
+                    {cities.length > 1
+                      ? cities.join(" & ")
+                      : locations
+                          .map(
+                            (l) =>
+                              l.neighborhood?.split("·")[0]?.trim() || l.name
+                          )
+                          .join(" & ")}
                   </span>
                 </div>
                 <div>
@@ -209,18 +277,24 @@ export default async function RestaurantCommercialPage({
                       isSunlitHero ? "text-ink" : "text-ivory"
                     }`}
                   >
-                    {eventSpaces.length > 0
+                    {enabledModules.events && eventSpaces.length > 0
                       ? `${Math.min(
                           ...eventSpaces.map((s) => s.min_guests)
                         )} – ${Math.max(
                           ...eventSpaces.map((s) => s.capacity_seated)
                         )} Inv.`
-                      : "Eventos"}
+                      : caps.directOrdersEnabled
+                      ? "0% Comisión"
+                      : "Carta Editorial"}
                   </span>
                   <span className="mt-0.5 block">
-                    {eventSpaces.length === 1
-                      ? "1 Salón Privado"
-                      : `${eventSpaces.length} Salones Privados`}
+                    {enabledModules.events && eventSpaces.length > 0
+                      ? eventSpaces.length === 1
+                        ? "1 Salón Privado"
+                        : `${eventSpaces.length} Salones Privados`
+                      : caps.directOrdersEnabled
+                      ? "Mesa QR & Domicilios Directos"
+                      : "Lectura Directa en Mesa"}
                   </span>
                 </div>
               </div>
@@ -251,7 +325,7 @@ export default async function RestaurantCommercialPage({
                       : "absolute inset-0 bg-gradient-to-t from-obsidian/85 via-transparent to-transparent"
                   }
                 />
-                {featuredSlice[0] && (
+                {featuredSlice[0] && enabledModules.menu && (
                   <Link
                     href={`/${restaurant.slug}/menu`}
                     className={
@@ -551,6 +625,10 @@ export default async function RestaurantCommercialPage({
           restaurantSlug={restaurant.slug}
           locations={locations}
           eventSpaces={eventSpaces}
+          enabledModules={{
+            menu: enabledModules.menu,
+            events: enabledModules.events,
+          }}
         />
       </main>
 
@@ -561,6 +639,16 @@ export default async function RestaurantCommercialPage({
         contact={contact}
         locations={locations}
         enabledModules={enabledModules}
+      />
+
+      <LivePlanSimulator
+        restaurantSlug={restaurant.slug}
+        restaurantName={restaurant.name}
+        isDemo={restaurant.is_demo}
+        activeSimPreset={caps.simPreset}
+        realPlanTier={data.entitlements.planTier}
+        realDesignTier={data.entitlements.designTier}
+        realSubscriptionStatus={data.entitlements.subscriptionStatus}
       />
     </div>
   );

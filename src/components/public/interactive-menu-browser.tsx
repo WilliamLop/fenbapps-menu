@@ -28,6 +28,7 @@ import {
   Copy,
   CheckCircle2,
   ShieldCheck,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { BrandIcon } from "@/components/public/brand-icon";
@@ -36,6 +37,10 @@ import {
   buildWhatsAppUrl,
   sanitizeNumericInput,
 } from "@/lib/utils";
+import {
+  resolveLocationDeliveryConfig,
+  resolveProductForLocation,
+} from "@/lib/saas-entitlements";
 import type {
   CategoryWithProducts,
   ProductWithDetails,
@@ -61,6 +66,9 @@ interface InteractiveMenuBrowserProps {
   whatsappPhone?: string;
   privacyPolicyText?: string;
   deliveryConfig: RestaurantDeliveryConfig;
+  tableShortlistEnabled?: boolean;
+  directOrdersEnabled?: boolean;
+  isVitrineOnly?: boolean;
   authenticityBadge?: string;
   serviceChargeNote?: string;
   scheduleLabel?: string | null;
@@ -78,6 +86,7 @@ interface TableSelectionItem {
   name: string;
   unitPrice: number;
   quantity: number;
+  selectedOptionIds?: string[];
   selectedOptionLabels: string[];
   portionLabel: string | null;
   exclusiveLocationId: string | null;
@@ -134,6 +143,9 @@ export function InteractiveMenuBrowser({
   whatsappPhone = "",
   privacyPolicyText = "Autorizo el uso de mis datos de contacto para gestionar la entrega de mi pedido.",
   deliveryConfig,
+  tableShortlistEnabled = true,
+  directOrdersEnabled = true,
+  isVitrineOnly = false,
   authenticityBadge,
   serviceChargeNote,
   scheduleLabel,
@@ -144,13 +156,30 @@ export function InteractiveMenuBrowser({
   initialMode,
   initialTableNumber,
 }: InteractiveMenuBrowserProps) {
-  const storageKey = `fenbapps:cart:v1:${restaurantSlug}`;
+  const storageKey = `fenbapps:cart:v2:${restaurantSlug}`;
   const isQrTableSession = Boolean(
     (initialTableNumber && initialTableNumber.trim().length > 0) ||
       (initialMode && initialMode.trim().toLowerCase() === "mesa")
   );
 
+  const cities = useMemo(
+    () =>
+      Array.from(new Set(locations.map((l) => (l.city || "Bogotá").trim()))),
+    [locations]
+  );
+  const isMultiCity = cities.length > 1;
+
   const [activeCategorySlug, setActiveCategorySlug] = useState<string>("all");
+  const [selectedCity, setSelectedCity] = useState<string>(() => {
+    if (initialLocationSlug && locations.length > 0) {
+      const normalized = initialLocationSlug.trim().toLowerCase();
+      const matched = locations.find(
+        (l) => l.slug.toLowerCase() === normalized || l.id === normalized
+      );
+      if (matched) return (matched.city || "Bogotá").trim();
+    }
+    return "all";
+  });
   const [selectedLocationId, setSelectedLocationId] = useState<string>(() => {
     if (initialLocationSlug && locations.length > 0) {
       const normalized = initialLocationSlug.trim().toLowerCase();
@@ -163,7 +192,9 @@ export function InteractiveMenuBrowser({
   });
 
   const [fulfillmentType, setFulfillmentType] = useState<FulfillmentType>(() =>
-    resolveInitialMode(initialMode, initialTableNumber, deliveryConfig)
+    directOrdersEnabled
+      ? resolveInitialMode(initialMode, initialTableNumber, deliveryConfig)
+      : "dine_in"
   );
   const [tableNumber, setTableNumber] = useState<string>(
     initialTableNumber?.trim() ?? ""
@@ -219,6 +250,87 @@ export function InteractiveMenuBrowser({
     useState<ConfirmedDirectOrderSummary | null>(null);
   const [isSubmittingOrder, startOrderTransition] = useTransition();
 
+  const locationMap = useMemo(() => {
+    const map = new Map<string, LocationRow>();
+    for (const loc of locations) {
+      map.set(loc.id, loc);
+    }
+    return map;
+  }, [locations]);
+
+  const productLookupMap = useMemo(() => {
+    const map = new Map<string, ProductWithDetails>();
+    for (const cat of categories) {
+      for (const prod of cat.products) {
+        map.set(prod.id, prod);
+      }
+    }
+    return map;
+  }, [categories]);
+
+  const activeLocationObj =
+    selectedLocationId !== "all"
+      ? locationMap.get(selectedLocationId) ?? null
+      : null;
+
+  const dispatchLocationObj =
+    locationMap.get(dispatchLocationId) ?? locations[0] ?? null;
+
+  const effectiveDeliveryConfig = useMemo(
+    () =>
+      resolveLocationDeliveryConfig(
+        dispatchLocationObj?.delivery_config,
+        deliveryConfig,
+        directOrdersEnabled
+      ),
+    [dispatchLocationObj, deliveryConfig, directOrdersEnabled]
+  );
+
+  // Clamp fulfillmentType and drawer if plan entitlements change live
+  useEffect(() => {
+    if (!directOrdersEnabled && fulfillmentType !== "dine_in") {
+      setFulfillmentType("dine_in");
+      return;
+    }
+    if (fulfillmentType === "delivery" && !effectiveDeliveryConfig.enabled) {
+      setFulfillmentType(
+        effectiveDeliveryConfig.pickupEnabled ? "pickup" : "dine_in"
+      );
+    } else if (
+      fulfillmentType === "pickup" &&
+      !effectiveDeliveryConfig.pickupEnabled
+    ) {
+      setFulfillmentType(
+        effectiveDeliveryConfig.enabled ? "delivery" : "dine_in"
+      );
+    }
+  }, [
+    directOrdersEnabled,
+    fulfillmentType,
+    effectiveDeliveryConfig.enabled,
+    effectiveDeliveryConfig.pickupEnabled,
+  ]);
+
+  useEffect(() => {
+    if ((!tableShortlistEnabled || isVitrineOnly) && isTableSheetOpen) {
+      setIsTableSheetOpen(false);
+    }
+  }, [tableShortlistEnabled, isVitrineOnly, isTableSheetOpen]);
+
+  // Keep selectedLocationId valid if locations list shrinks (e.g. simulating Basic plan)
+  useEffect(() => {
+    if (
+      selectedLocationId !== "all" &&
+      !locationMap.has(selectedLocationId)
+    ) {
+      setSelectedLocationId("all");
+      setSelectedCity("all");
+    }
+    if (dispatchLocationId && !locationMap.has(dispatchLocationId)) {
+      setDispatchLocationId(locations[0]?.id ?? "");
+    }
+  }, [selectedLocationId, dispatchLocationId, locationMap, locations]);
+
   // Hydrate persisted selection & delivery profile safely on client mount
   useEffect(() => {
     try {
@@ -240,6 +352,7 @@ export function InteractiveMenuBrowser({
           }
         }
         if (
+          directOrdersEnabled &&
           !initialMode &&
           !initialTableNumber &&
           (parsed.fulfillmentType === "dine_in" ||
@@ -271,6 +384,7 @@ export function InteractiveMenuBrowser({
     storageKey,
     initialMode,
     initialTableNumber,
+    directOrdersEnabled,
     deliveryConfig.enabled,
     deliveryConfig.pickupEnabled,
   ]);
@@ -307,24 +421,73 @@ export function InteractiveMenuBrowser({
   useEffect(() => {
     if (selectedLocationId !== "all") {
       setDispatchLocationId(selectedLocationId);
+      const loc = locationMap.get(selectedLocationId);
+      if (loc) {
+        setSelectedCity((loc.city || "Bogotá").trim());
+      }
     }
-  }, [selectedLocationId]);
+  }, [selectedLocationId, locationMap]);
 
-  const locationMap = useMemo(() => {
-    const map = new Map<string, LocationRow>();
-    for (const loc of locations) {
-      map.set(loc.id, loc);
-    }
-    return map;
-  }, [locations]);
-
-  const activeLocationObj =
+  const effectiveCatalogLocationId =
     selectedLocationId !== "all"
-      ? locationMap.get(selectedLocationId) ?? null
-      : null;
+      ? selectedLocationId
+      : fulfillmentType !== "dine_in" && dispatchLocationObj
+      ? dispatchLocationObj.id
+      : locations.length === 1 && locations[0]
+      ? locations[0].id
+      : "all";
 
-  const dispatchLocationObj =
-    locationMap.get(dispatchLocationId) ?? locations[0] ?? null;
+  // Reconcile cart unitPrice whenever location or catalog prices change
+  useEffect(() => {
+    if (!hasHydratedStorage || tableSelection.length === 0) return;
+    const pricingLocId =
+      fulfillmentType !== "dine_in" && dispatchLocationObj
+        ? dispatchLocationObj.id
+        : effectiveCatalogLocationId;
+
+    setTableSelection((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        const prod = productLookupMap.get(item.productId);
+        if (!prod) return item;
+        const locState = resolveProductForLocation(prod, pricingLocId);
+        let optionsDelta = 0;
+        if (item.selectedOptionIds && item.selectedOptionIds.length > 0) {
+          const optSet = new Set(item.selectedOptionIds);
+          for (const grp of prod.optionGroups) {
+            for (const opt of grp.options) {
+              if (optSet.has(opt.id)) {
+                optionsDelta += Number(opt.price_delta);
+              }
+            }
+          }
+        } else if (item.selectedOptionLabels.length > 0) {
+          const lblSet = new Set(item.selectedOptionLabels);
+          for (const grp of prod.optionGroups) {
+            for (const opt of grp.options) {
+              if (lblSet.has(opt.name)) {
+                optionsDelta += Number(opt.price_delta);
+              }
+            }
+          }
+        }
+        const expectedUnitPrice = locState.effectivePrice + optionsDelta;
+        if (expectedUnitPrice !== item.unitPrice) {
+          changed = true;
+          return { ...item, unitPrice: expectedUnitPrice };
+        }
+        return item;
+      });
+      return changed ? next : prev;
+    });
+  }, [
+    hasHydratedStorage,
+    fulfillmentType,
+    dispatchLocationObj,
+    effectiveCatalogLocationId,
+    productLookupMap,
+    tableSelection.length,
+  ]);
 
   const filteredCategories = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -335,17 +498,28 @@ export function InteractiveMenuBrowser({
       )
       .map((cat) => {
         const matchingProducts = cat.products.filter((prod) => {
-          if (
-            selectedLocationId !== "all" &&
-            prod.exclusive_location_id &&
-            prod.exclusive_location_id !== selectedLocationId
-          ) {
+          const locState = resolveProductForLocation(
+            prod,
+            effectiveCatalogLocationId
+          );
+          if (!locState.isOffered || locState.availabilityStatus === "hidden") {
             return false;
+          }
+          if (
+            isMultiCity &&
+            selectedCity !== "all" &&
+            effectiveCatalogLocationId === "all" &&
+            prod.exclusive_location_id
+          ) {
+            const exLoc = locationMap.get(prod.exclusive_location_id);
+            if ((exLoc?.city || "Bogotá").trim() !== selectedCity) {
+              return false;
+            }
           }
           if (onlyHighlights && !prod.is_featured && !prod.is_chef_choice) {
             return false;
           }
-          if (onlyAvailable && prod.availability_status !== "available") {
+          if (onlyAvailable && locState.availabilityStatus !== "available") {
             return false;
           }
           if (
@@ -377,7 +551,10 @@ export function InteractiveMenuBrowser({
   }, [
     categories,
     activeCategorySlug,
-    selectedLocationId,
+    effectiveCatalogLocationId,
+    isMultiCity,
+    selectedCity,
+    locationMap,
     searchQuery,
     onlyHighlights,
     onlyAvailable,
@@ -407,9 +584,17 @@ export function InteractiveMenuBrowser({
     setSelectedProduct(product);
   }
 
+  const selectedProductLocState = useMemo(
+    () =>
+      selectedProduct
+        ? resolveProductForLocation(selectedProduct, effectiveCatalogLocationId)
+        : null,
+    [selectedProduct, effectiveCatalogLocationId]
+  );
+
   const computedDetailPrice = useMemo(() => {
-    if (!selectedProduct) return 0;
-    let total = Number(selectedProduct.base_price);
+    if (!selectedProduct || !selectedProductLocState) return 0;
+    let total = selectedProductLocState.effectivePrice;
     for (const grp of selectedProduct.optionGroups) {
       const chosenId = selectedOptions[grp.id];
       const chosenOpt = grp.options.find((o) => o.id === chosenId);
@@ -418,25 +603,42 @@ export function InteractiveMenuBrowser({
       }
     }
     return total;
-  }, [selectedProduct, selectedOptions]);
+  }, [selectedProduct, selectedProductLocState, selectedOptions]);
 
   function addProductToTableSelection(
     product: ProductWithDetails,
     customUnitPrice?: number,
-    customOptionLabels?: string[]
+    customOptionLabels?: string[],
+    customOptionIds?: string[]
   ) {
-    if (product.availability_status === "sold_out") {
-      toast.error("Este plato se encuentra agotado por hoy.");
+    if (!tableShortlistEnabled || isVitrineOnly) {
       return;
     }
 
-    const optionLabels =
-      customOptionLabels ??
-      product.optionGroups
-        .map((g) => g.options.find((o) => o.is_available)?.name)
-        .filter((n): n is string => Boolean(n));
+    const locState = resolveProductForLocation(
+      product,
+      effectiveCatalogLocationId
+    );
+    if (!locState.isOffered || locState.availabilityStatus === "sold_out") {
+      toast.error("Este plato se encuentra agotado en esta sede por hoy.");
+      return;
+    }
 
-    const unitPrice = customUnitPrice ?? Number(product.base_price);
+    const defaultAvailableOptions = product.optionGroups
+      .map((g) => g.options.find((o) => o.is_available))
+      .filter((o): o is NonNullable<typeof o> => Boolean(o));
+
+    const optionLabels =
+      customOptionLabels ?? defaultAvailableOptions.map((o) => o.name);
+    const optionIds =
+      customOptionIds ?? defaultAvailableOptions.map((o) => o.id);
+
+    const defaultDelta = defaultAvailableOptions.reduce(
+      (sum, o) => sum + Number(o.price_delta),
+      0
+    );
+
+    const unitPrice = customUnitPrice ?? locState.effectivePrice + defaultDelta;
     const key = `${product.id}::${optionLabels.join("|")}`;
 
     setConfirmedOrder(null);
@@ -455,6 +657,7 @@ export function InteractiveMenuBrowser({
           name: product.name,
           unitPrice,
           quantity: 1,
+          selectedOptionIds: optionIds,
           selectedOptionLabels: optionLabels,
           portionLabel: product.portion_label,
           exclusiveLocationId: product.exclusive_location_id ?? null,
@@ -513,28 +716,28 @@ export function InteractiveMenuBrowser({
       ? Math.round(tableTotalWithTip / splitPeopleCount)
       : tableTotalWithTip;
 
-  // Delivery & Pickup Calculations
+  // Delivery & Pickup Calculations (Per-Location Logistics!)
   const qualifiesForFreeDelivery =
-    deliveryConfig.freeDeliveryThreshold > 0 &&
-    tableSubtotal >= deliveryConfig.freeDeliveryThreshold;
+    effectiveDeliveryConfig.freeDeliveryThreshold > 0 &&
+    tableSubtotal >= effectiveDeliveryConfig.freeDeliveryThreshold;
 
   const computedDeliveryFee =
     fulfillmentType === "delivery"
       ? qualifiesForFreeDelivery
         ? 0
-        : deliveryConfig.deliveryFee
+        : effectiveDeliveryConfig.deliveryFee
       : 0;
 
   const missingForFreeDelivery =
     fulfillmentType === "delivery" &&
-    deliveryConfig.freeDeliveryThreshold > tableSubtotal
-      ? deliveryConfig.freeDeliveryThreshold - tableSubtotal
+    effectiveDeliveryConfig.freeDeliveryThreshold > tableSubtotal
+      ? effectiveDeliveryConfig.freeDeliveryThreshold - tableSubtotal
       : 0;
 
   const missingForMinOrder =
     fulfillmentType === "delivery" &&
-    deliveryConfig.minOrderAmount > tableSubtotal
-      ? deliveryConfig.minOrderAmount - tableSubtotal
+    effectiveDeliveryConfig.minOrderAmount > tableSubtotal
+      ? effectiveDeliveryConfig.minOrderAmount - tableSubtotal
       : 0;
 
   const directOrderTotal = tableSubtotal + computedDeliveryFee;
@@ -547,12 +750,25 @@ export function InteractiveMenuBrowser({
     ) {
       return [];
     }
-    return tableSelection.filter(
-      (item) =>
+    return tableSelection.filter((item) => {
+      if (
         item.exclusiveLocationId &&
         item.exclusiveLocationId !== dispatchLocationId
-    );
-  }, [fulfillmentType, locations.length, dispatchLocationId, tableSelection]);
+      ) {
+        return true;
+      }
+      const prod = productLookupMap.get(item.productId);
+      if (!prod) return false;
+      const locState = resolveProductForLocation(prod, dispatchLocationId);
+      return !locState.isOffered || locState.availabilityStatus === "sold_out";
+    });
+  }, [
+    fulfillmentType,
+    locations.length,
+    dispatchLocationId,
+    tableSelection,
+    productLookupMap,
+  ]);
 
   const cashBillNumeric = cashBillInput === "" ? 0 : Number(cashBillInput);
   const cashChangeAmount =
@@ -608,7 +824,7 @@ export function InteractiveMenuBrowser({
   ]);
 
   function copyTransferInstructions() {
-    navigator.clipboard.writeText(deliveryConfig.transferInstructions);
+    navigator.clipboard.writeText(effectiveDeliveryConfig.transferInstructions);
     setCopiedTransfer(true);
     toast.success("Datos de transferencia copiados al portapapeles");
     setTimeout(() => setCopiedTransfer(false), 2400);
@@ -618,6 +834,13 @@ export function InteractiveMenuBrowser({
     e.preventDefault();
     setCheckoutError(null);
 
+    if (!directOrdersEnabled || isVitrineOnly) {
+      setCheckoutError(
+        "El canal de pedidos directos no está activo en este plan."
+      );
+      return;
+    }
+
     if (tableSelection.length === 0) {
       setCheckoutError("Agrega al menos un plato a tu pedido.");
       return;
@@ -625,11 +848,11 @@ export function InteractiveMenuBrowser({
 
     if (
       fulfillmentType === "delivery" &&
-      tableSubtotal < deliveryConfig.minOrderAmount
+      tableSubtotal < effectiveDeliveryConfig.minOrderAmount
     ) {
       setCheckoutError(
-        `El pedido mínimo a domicilio es de ${formatCurrency(
-          deliveryConfig.minOrderAmount,
+        `El pedido mínimo a domicilio en esta sede es de ${formatCurrency(
+          effectiveDeliveryConfig.minOrderAmount,
           currencyCode
         )}.`
       );
@@ -638,7 +861,7 @@ export function InteractiveMenuBrowser({
 
     if (conflictingLocationItems.length > 0) {
       setCheckoutError(
-        "Tienes platos exclusivos de otra sede en la bolsa. Ajusta la sede de despacho o retíralos antes de confirmar."
+        "Tienes platos agotados o exclusivos de otra sede en la bolsa. Ajusta la sede de despacho o retíralos antes de confirmar."
       );
       return;
     }
@@ -699,6 +922,7 @@ export function InteractiveMenuBrowser({
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           options: item.selectedOptionLabels,
+          optionIds: item.selectedOptionIds ?? [],
         })),
         subtotalAmount: tableSubtotal,
         deliveryFee: computedDeliveryFee,
@@ -734,7 +958,7 @@ export function InteractiveMenuBrowser({
         modeHeadline,
         `Restaurante: *${restaurantName}*${
           dispatchLocationObj && locations.length > 1
-            ? ` (${dispatchLocationObj.name})`
+            ? ` (${dispatchLocationObj.name} · ${dispatchLocationObj.city})`
             : ""
         }`,
         `Cliente: *${customerName.trim()}* (${customerPhone.trim()})`,
@@ -779,13 +1003,14 @@ export function InteractiveMenuBrowser({
     });
   }
 
+  const canUseShortlist = tableShortlistEnabled && !isVitrineOnly;
   const quickAddButtonLabel =
     fulfillmentType === "dine_in" ? "Mi Mesa" : "Pedir";
 
   const enabledModesCount =
     1 +
-    Number(deliveryConfig.enabled) +
-    Number(deliveryConfig.pickupEnabled);
+    Number(effectiveDeliveryConfig.enabled) +
+    Number(effectiveDeliveryConfig.pickupEnabled);
 
   const drawerModeCols =
     enabledModesCount === 3
@@ -810,6 +1035,12 @@ export function InteractiveMenuBrowser({
               <span className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-canvas-elevated px-3 py-1 text-xs text-ink-muted">
                 <Clock className="size-3.5 shrink-0 text-ember" />
                 <span>{scheduleLabel}</span>
+              </span>
+            )}
+            {!canUseShortlist && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-canvas-elevated px-3 py-1 text-xs font-semibold text-ink-muted">
+                <Eye className="size-3.5 shrink-0 text-ember" />
+                <span>Carta Informativa de Consulta</span>
               </span>
             )}
           </div>
@@ -892,128 +1123,203 @@ export function InteractiveMenuBrowser({
       </div>
 
       {/* Dual / Triple Customer Experience Switcher (Smart QR Context Detection) */}
-      {(deliveryConfig.enabled || deliveryConfig.pickupEnabled) && (
-        <div className="mb-4 rounded-2xl border border-hairline bg-canvas-elevated p-3.5 sm:px-5">
-          {isQrTableSession && fulfillmentType === "dine_in" ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 text-ink">
-                <UtensilsCrossed className="size-4 text-ember" />
-                <span>
-                  Estás viendo la carta en{" "}
-                  <strong>
-                    Modo Mesa{tableNumber ? ` #${tableNumber}` : ""}
-                  </strong>
-                  . Arma tu selección para mostrarla al mesero.
-                </span>
-              </div>
-              {deliveryConfig.enabled && (
-                <button
-                  type="button"
-                  onClick={() => setFulfillmentType("delivery")}
-                  className="font-semibold text-ember underline-offset-2 hover:underline"
-                >
-                  ¿Prefieres pedir a domicilio?
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setFulfillmentType("dine_in")}
-                  className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
-                    fulfillmentType === "dine_in"
-                      ? "bg-ink text-ivory shadow-2xs"
-                      : "border border-hairline bg-canvas text-ink-muted hover:text-ink"
-                  }`}
-                >
-                  <UtensilsCrossed
-                    className={`size-3.5 ${
-                      fulfillmentType === "dine_in"
-                        ? "text-gold"
-                        : "text-ember"
-                    }`}
-                  />
-                  <span>En el Restaurante</span>
-                </button>
-
-                {deliveryConfig.enabled && (
+      {canUseShortlist &&
+        (effectiveDeliveryConfig.enabled ||
+          effectiveDeliveryConfig.pickupEnabled) && (
+          <div className="mb-4 rounded-2xl border border-hairline bg-canvas-elevated p-3.5 sm:px-5">
+            {isQrTableSession && fulfillmentType === "dine_in" ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 text-ink">
+                  <UtensilsCrossed className="size-4 text-ember" />
+                  <span>
+                    Estás viendo la carta en{" "}
+                    <strong>
+                      Modo Mesa{tableNumber ? ` #${tableNumber}` : ""}
+                    </strong>
+                    . Arma tu selección para mostrarla al mesero.
+                  </span>
+                </div>
+                {effectiveDeliveryConfig.enabled && (
                   <button
                     type="button"
                     onClick={() => setFulfillmentType("delivery")}
-                    className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
-                      fulfillmentType === "delivery"
-                        ? "bg-ember text-ivory shadow-2xs"
-                        : "border border-hairline bg-canvas text-ink-muted hover:text-ink"
-                    }`}
+                    className="font-semibold text-ember underline-offset-2 hover:underline"
                   >
-                    <Bike className="size-3.5" />
-                    <span>Pedir a Domicilio</span>
-                  </button>
-                )}
-
-                {deliveryConfig.pickupEnabled && (
-                  <button
-                    type="button"
-                    onClick={() => setFulfillmentType("pickup")}
-                    className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
-                      fulfillmentType === "pickup"
-                        ? "bg-ember text-ivory shadow-2xs"
-                        : "border border-hairline bg-canvas text-ink-muted hover:text-ink"
-                    }`}
-                  >
-                    <ShoppingBag className="size-3.5" />
-                    <span>Pasar a Recoger</span>
+                    ¿Prefieres pedir a domicilio?
                   </button>
                 )}
               </div>
+            ) : (
+              <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setFulfillmentType("dine_in")}
+                    className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+                      fulfillmentType === "dine_in"
+                        ? "bg-ink text-ivory shadow-2xs"
+                        : "border border-hairline bg-canvas text-ink-muted hover:text-ink"
+                    }`}
+                  >
+                    <UtensilsCrossed
+                      className={`size-3.5 ${
+                        fulfillmentType === "dine_in"
+                          ? "text-gold"
+                          : "text-ember"
+                      }`}
+                    />
+                    <span>En el Restaurante</span>
+                  </button>
 
-              <div className="text-xs leading-relaxed text-ink-muted">
-                {fulfillmentType === "dine_in" && (
-                  <span>
-                    Pre-selecciona platos, divide la cuenta exacta o muéstrale a
-                    tu mesero.
-                  </span>
-                )}
-                {fulfillmentType === "delivery" && (
-                  <span>
-                    <strong className="font-semibold text-ink">
-                      Envío directo ({deliveryConfig.estimatedDeliveryMinutes}):
-                    </strong>{" "}
-                    {formatCurrency(deliveryConfig.deliveryFee, currencyCode)} ·{" "}
-                    <span className="font-semibold text-sage">
-                      Gratis desde{" "}
+                  {effectiveDeliveryConfig.enabled && (
+                    <button
+                      type="button"
+                      onClick={() => setFulfillmentType("delivery")}
+                      className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+                        fulfillmentType === "delivery"
+                          ? "bg-ember text-ivory shadow-2xs"
+                          : "border border-hairline bg-canvas text-ink-muted hover:text-ink"
+                      }`}
+                    >
+                      <Bike className="size-3.5" />
+                      <span>Pedir a Domicilio</span>
+                    </button>
+                  )}
+
+                  {effectiveDeliveryConfig.pickupEnabled && (
+                    <button
+                      type="button"
+                      onClick={() => setFulfillmentType("pickup")}
+                      className={`inline-flex min-h-10 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
+                        fulfillmentType === "pickup"
+                          ? "bg-ember text-ivory shadow-2xs"
+                          : "border border-hairline bg-canvas text-ink-muted hover:text-ink"
+                      }`}
+                    >
+                      <ShoppingBag className="size-3.5" />
+                      <span>Pasar a Recoger</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="text-xs leading-relaxed text-ink-muted">
+                  {fulfillmentType === "dine_in" && (
+                    <span>
+                      Pre-selecciona platos, divide la cuenta exacta o muéstrale
+                      a tu mesero.
+                    </span>
+                  )}
+                  {fulfillmentType === "delivery" && (
+                    <span>
+                      <strong className="font-semibold text-ink">
+                        Envío directo
+                        {dispatchLocationObj && locations.length > 1
+                          ? ` (${dispatchLocationObj.name} · ${effectiveDeliveryConfig.estimatedDeliveryMinutes})`
+                          : ` (${effectiveDeliveryConfig.estimatedDeliveryMinutes})`}
+                        :
+                      </strong>{" "}
                       {formatCurrency(
-                        deliveryConfig.freeDeliveryThreshold,
+                        effectiveDeliveryConfig.deliveryFee,
                         currencyCode
-                      )}
-                    </span>{" "}
-                    · Efectivo, Datáfono o Transferencia.
-                  </span>
-                )}
-                {fulfillmentType === "pickup" && (
-                  <span>
-                    <strong className="font-semibold text-ink">
-                      Listo en {deliveryConfig.estimatedPickupMinutes}:
-                    </strong>{" "}
-                    Sin recargos · Recoge directo en el restaurante.
-                  </span>
-                )}
+                      )}{" "}
+                      ·{" "}
+                      <span className="font-semibold text-sage">
+                        Gratis desde{" "}
+                        {formatCurrency(
+                          effectiveDeliveryConfig.freeDeliveryThreshold,
+                          currencyCode
+                        )}
+                      </span>{" "}
+                      · Efectivo, Datáfono o Bre-B.
+                    </span>
+                  )}
+                  {fulfillmentType === "pickup" && (
+                    <span>
+                      <strong className="font-semibold text-ink">
+                        Listo en{" "}
+                        {effectiveDeliveryConfig.estimatedPickupMinutes}:
+                      </strong>{" "}
+                      Sin recargos · Recoge directo en{" "}
+                      {dispatchLocationObj && locations.length > 1
+                        ? dispatchLocationObj.name
+                        : "el restaurante"}
+                      .
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+      {/* Multi-City & Multi-Location Menu Selector (Hidden automatically when restaurant has 1 location) */}
+      {locations.length > 1 && (
+        <div className="mb-5 space-y-2.5 rounded-2xl border border-hairline bg-canvas-elevated p-3.5 sm:px-5">
+          {isMultiCity && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline pb-2.5">
+              <div className="flex items-center gap-2 text-xs">
+                <MapPin className="size-4 shrink-0 text-ember" />
+                <span className="font-semibold text-ink">
+                  1. Selecciona tu ciudad:
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCity("all");
+                    setSelectedLocationId("all");
+                  }}
+                  className={`rounded-full px-3.5 py-1 text-xs font-semibold transition ${
+                    selectedCity === "all"
+                      ? "bg-ink text-ivory shadow-2xs"
+                      : "bg-canvas-muted text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  Todas las ciudades ({cities.length})
+                </button>
+                {cities.map((city) => {
+                  const locsInCity = locations.filter(
+                    (l) => (l.city || "Bogotá").trim() === city
+                  );
+                  return (
+                    <button
+                      key={city}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCity(city);
+                        if (locsInCity.length === 1 && locsInCity[0]) {
+                          setSelectedLocationId(locsInCity[0].id);
+                        } else {
+                          setSelectedLocationId("all");
+                          if (locsInCity[0]) {
+                            setDispatchLocationId(locsInCity[0].id);
+                          }
+                        }
+                      }}
+                      className={`rounded-full px-3.5 py-1 text-xs font-semibold transition ${
+                        selectedCity === city
+                          ? "bg-ember text-ivory shadow-2xs"
+                          : "bg-canvas-muted text-ink-muted hover:text-ink"
+                      }`}
+                    >
+                      {city} ({locsInCity.length})
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* Multi-Location Menu Selector (Hidden automatically when restaurant has 1 location) */}
-      {locations.length > 1 && (
-        <div className="mb-5 rounded-2xl border border-hairline bg-canvas-elevated p-3.5 sm:px-5">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
             <div className="flex items-center gap-2 text-xs">
-              <MapPin className="size-4 shrink-0 text-ember" />
+              {!isMultiCity && (
+                <MapPin className="size-4 shrink-0 text-ember" />
+              )}
               <span className="font-semibold text-ink">
-                Disponibilidad y especialidades por sede:
+                {isMultiCity
+                  ? "2. Sede y disponibilidad en vivo:"
+                  : "Disponibilidad y especialidades por sede:"}
               </span>
             </div>
 
@@ -1027,34 +1333,46 @@ export function InteractiveMenuBrowser({
                     : "bg-canvas-muted text-ink-muted hover:text-ink"
                 }`}
               >
-                Todas las sedes ({locations.length})
+                {isMultiCity && selectedCity !== "all"
+                  ? `Todas en ${selectedCity}`
+                  : `Todas las sedes (${locations.length})`}
               </button>
-              {locations.map((loc) => (
-                <button
-                  key={loc.id}
-                  type="button"
-                  onClick={() => setSelectedLocationId(loc.id)}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
-                    selectedLocationId === loc.id
-                      ? "bg-ember text-ivory shadow-2xs"
-                      : "bg-canvas-muted text-ink-muted hover:text-ink"
-                  }`}
-                >
-                  <span>{loc.name}</span>
-                </button>
-              ))}
+              {locations
+                .filter(
+                  (loc) =>
+                    !isMultiCity ||
+                    selectedCity === "all" ||
+                    (loc.city || "Bogotá").trim() === selectedCity
+                )
+                .map((loc) => (
+                  <button
+                    key={loc.id}
+                    type="button"
+                    onClick={() => setSelectedLocationId(loc.id)}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                      selectedLocationId === loc.id
+                        ? "bg-ember text-ivory shadow-2xs"
+                        : "bg-canvas-muted text-ink-muted hover:text-ink"
+                    }`}
+                  >
+                    <span>
+                      {isMultiCity && selectedCity === "all"
+                        ? `${loc.city} · ${loc.name}`
+                        : loc.name}
+                    </span>
+                  </button>
+                ))}
             </div>
           </div>
 
           {activeLocationObj && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-2.5 text-xs text-ink-muted">
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-hairline pt-2.5 text-xs text-ink-muted">
               <p>
-                Mostrando la carta disponible en{" "}
+                Mostrando precios y stock en vivo de{" "}
                 <strong className="font-semibold text-ink">
-                  {activeLocationObj.name}
+                  {activeLocationObj.name} · {activeLocationObj.city}
                 </strong>{" "}
-                ({activeLocationObj.address_line}), incluyendo platos
-                compartidos y creaciones exclusivas de esta sede.
+                ({activeLocationObj.address_line}).
               </p>
               {activeLocationObj.exclusive_features?.length > 0 && (
                 <span className="rounded-full border border-ember/25 bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
@@ -1123,6 +1441,7 @@ export function InteractiveMenuBrowser({
               setOnlyHighlights(false);
               setOnlyAvailable(false);
               setDietaryTag(null);
+              setSelectedCity("all");
               setSelectedLocationId("all");
               setActiveCategorySlug("all");
             }}
@@ -1181,8 +1500,12 @@ export function InteractiveMenuBrowser({
                     }`}
                   >
                     {category.products.map((product) => {
+                      const locState = resolveProductForLocation(
+                        product,
+                        effectiveCatalogLocationId
+                      );
                       const isSoldOut =
-                        product.availability_status === "sold_out";
+                        locState.availabilityStatus === "sold_out";
                       const exclusiveLoc = product.exclusive_location_id
                         ? locationMap.get(product.exclusive_location_id)
                         : null;
@@ -1233,7 +1556,7 @@ export function InteractiveMenuBrowser({
                                 </h3>
                                 <span className="tabular-price shrink-0 font-mono text-sm sm:text-base font-semibold text-ember">
                                   {formatCurrency(
-                                    Number(product.base_price),
+                                    locState.effectivePrice,
                                     currencyCode
                                   )}
                                 </span>
@@ -1273,7 +1596,7 @@ export function InteractiveMenuBrowser({
                                 ))}
                               </div>
 
-                              {!isSoldOut && (
+                              {canUseShortlist && !isSoldOut && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -1304,8 +1627,12 @@ export function InteractiveMenuBrowser({
                   }
                 >
                   {category.products.map((product, productIndex) => {
+                    const locState = resolveProductForLocation(
+                      product,
+                      effectiveCatalogLocationId
+                    );
                     const isSoldOut =
-                      product.availability_status === "sold_out";
+                      locState.availabilityStatus === "sold_out";
                     const exclusiveLoc = product.exclusive_location_id
                       ? locationMap.get(product.exclusive_location_id)
                       : null;
@@ -1390,7 +1717,7 @@ export function InteractiveMenuBrowser({
                             <div className="absolute right-3.5 bottom-3 rounded-full border border-obsidian-border bg-obsidian/92 px-3.5 py-1.5 backdrop-blur-xs">
                               <span className="tabular-price font-mono text-sm font-semibold text-ivory">
                                 {formatCurrency(
-                                  Number(product.base_price),
+                                  locState.effectivePrice,
                                   currencyCode
                                 )}
                               </span>
@@ -1413,7 +1740,7 @@ export function InteractiveMenuBrowser({
                               {!product.image_url && (
                                 <span className="tabular-price font-mono text-base font-semibold text-ember">
                                   {formatCurrency(
-                                    Number(product.base_price),
+                                    locState.effectivePrice,
                                     currencyCode
                                   )}
                                 </span>
@@ -1445,7 +1772,7 @@ export function InteractiveMenuBrowser({
                             </span>
 
                             <div className="flex items-center gap-2">
-                              {!isSoldOut && (
+                              {canUseShortlist && !isSoldOut && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -1463,7 +1790,8 @@ export function InteractiveMenuBrowser({
                                 </button>
                               )}
                               <span className="inline-flex items-center gap-1 text-xs font-semibold text-ember transition group-hover:translate-x-0.5">
-                                {product.optionGroups.length > 0
+                                {canUseShortlist &&
+                                product.optionGroups.length > 0
                                   ? "Personalizar opciones"
                                   : "Ver detalle"}
                                 <ChevronRight className="size-3.5" />
@@ -1491,7 +1819,7 @@ export function InteractiveMenuBrowser({
       )}
 
       {/* Floating Bottom Bar: High-Contrast Pill Adapting to Dine-In vs Delivery vs Pickup */}
-      {(totalTableItems > 0 || confirmedOrder) && (
+      {canUseShortlist && (totalTableItems > 0 || confirmedOrder) && (
         <div className="fixed right-4 bottom-4 left-4 z-40 mx-auto max-w-xl">
           <button
             type="button"
@@ -1580,7 +1908,8 @@ export function InteractiveMenuBrowser({
 
               <div className="p-5 sm:p-6">
                 <div className="flex flex-wrap items-center gap-2 pr-10">
-                  {selectedProduct.availability_status === "sold_out" && (
+                  {selectedProductLocState?.availabilityStatus ===
+                    "sold_out" && (
                     <span className="rounded-full bg-amber-warn/15 px-3 py-1 text-xs font-semibold text-amber-warn">
                       Agotado por hoy
                     </span>
@@ -1740,35 +2069,39 @@ export function InteractiveMenuBrowser({
               </div>
 
               <div className="flex items-center gap-2">
-                {selectedProduct.availability_status !== "sold_out" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const chosenLabels = selectedProduct.optionGroups
-                        .map((grp) => {
-                          const chosenId = selectedOptions[grp.id];
-                          return grp.options.find((o) => o.id === chosenId)
-                            ?.name;
-                        })
-                        .filter((n): n is string => Boolean(n));
+                {canUseShortlist &&
+                  selectedProductLocState?.availabilityStatus !==
+                    "sold_out" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const chosenOptions = selectedProduct.optionGroups
+                          .map((grp) => {
+                            const chosenId = selectedOptions[grp.id];
+                            return grp.options.find((o) => o.id === chosenId);
+                          })
+                          .filter((o): o is NonNullable<typeof o> =>
+                            Boolean(o)
+                          );
 
-                      addProductToTableSelection(
-                        selectedProduct,
-                        computedDetailPrice,
-                        chosenLabels
-                      );
-                      setSelectedProduct(null);
-                    }}
-                    className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-ember px-5 py-2.5 text-sm font-semibold text-ivory shadow-xs transition hover:bg-ember-hover"
-                  >
-                    <Plus className="size-4" />
-                    <span>
-                      {fulfillmentType === "dine_in"
-                        ? "Agregar a mi mesa"
-                        : "Agregar al pedido"}
-                    </span>
-                  </button>
-                )}
+                        addProductToTableSelection(
+                          selectedProduct,
+                          computedDetailPrice,
+                          chosenOptions.map((o) => o.name),
+                          chosenOptions.map((o) => o.id)
+                        );
+                        setSelectedProduct(null);
+                      }}
+                      className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-ember px-5 py-2.5 text-sm font-semibold text-ivory shadow-xs transition hover:bg-ember-hover"
+                    >
+                      <Plus className="size-4" />
+                      <span>
+                        {fulfillmentType === "dine_in"
+                          ? "Agregar a mi mesa"
+                          : "Agregar al pedido"}
+                      </span>
+                    </button>
+                  )}
 
                 <button
                   type="button"
@@ -1862,7 +2195,7 @@ export function InteractiveMenuBrowser({
                     <span>En Mesa</span>
                   </button>
 
-                  {deliveryConfig.enabled && (
+                  {effectiveDeliveryConfig.enabled && (
                     <button
                       type="button"
                       role="tab"
@@ -1882,7 +2215,7 @@ export function InteractiveMenuBrowser({
                     </button>
                   )}
 
-                  {deliveryConfig.pickupEnabled && (
+                  {effectiveDeliveryConfig.pickupEnabled && (
                     <button
                       type="button"
                       role="tab"
@@ -2153,10 +2486,10 @@ export function InteractiveMenuBrowser({
                       <div className="rounded-2xl border border-hairline bg-canvas px-4 py-3 text-xs">
                         {missingForMinOrder > 0 ? (
                           <p className="font-semibold text-amber-warn">
-                            Pedido mínimo a domicilio:{" "}
+                            Pedido mínimo a domicilio en esta sede:{" "}
                             <strong>
                               {formatCurrency(
-                                deliveryConfig.minOrderAmount,
+                                effectiveDeliveryConfig.minOrderAmount,
                                 currencyCode
                               )}
                             </strong>{" "}
@@ -2190,7 +2523,7 @@ export function InteractiveMenuBrowser({
                       </div>
                     )}
 
-                    {/* Multi-Location Dispatch Selector + Exclusivity Guard */}
+                    {/* Multi-City & Multi-Location Dispatch Selector + Exclusivity/Stock Guard */}
                     {locations.length > 1 ? (
                       <div>
                         <label
@@ -2198,8 +2531,8 @@ export function InteractiveMenuBrowser({
                           className="mb-1.5 block text-xs font-semibold text-ink"
                         >
                           {fulfillmentType === "delivery"
-                            ? "Sede desde donde despachamos *"
-                            : "Sede donde pasas a recoger *"}
+                            ? "Ciudad y sede desde donde despachamos *"
+                            : "Ciudad y sede donde pasas a recoger *"}
                         </label>
                         <select
                           id="dispatchLocationSelect"
@@ -2209,17 +2542,33 @@ export function InteractiveMenuBrowser({
                           }
                           className="h-11 w-full rounded-xl border border-border-strong bg-canvas px-3 text-base text-ink focus:border-ember focus:outline-none sm:text-xs"
                         >
-                          {locations.map((loc) => (
-                            <option key={loc.id} value={loc.id}>
-                              {loc.name} · {loc.address_line}
-                            </option>
-                          ))}
+                          {isMultiCity
+                            ? cities.map((city) => (
+                                <optgroup key={city} label={city}>
+                                  {locations
+                                    .filter(
+                                      (l) =>
+                                        (l.city || "Bogotá").trim() === city
+                                    )
+                                    .map((loc) => (
+                                      <option key={loc.id} value={loc.id}>
+                                        {loc.name} · {loc.address_line}
+                                      </option>
+                                    ))}
+                                </optgroup>
+                              ))
+                            : locations.map((loc) => (
+                                <option key={loc.id} value={loc.id}>
+                                  {loc.name} · {loc.address_line}
+                                </option>
+                              ))}
                         </select>
 
                         {conflictingLocationItems.length > 0 && (
                           <div className="mt-2 rounded-xl border border-amber-warn/40 bg-amber-warn/10 p-3 text-xs text-ink">
                             <p className="font-semibold text-amber-warn">
-                              Atención: Plato exclusivo de otra sede
+                              Atención: Platos no disponibles en{" "}
+                              {dispatchLocationObj?.name ?? "esta sede"}
                             </p>
                             <p className="mt-0.5 text-ink-muted">
                               <strong>
@@ -2227,34 +2576,45 @@ export function InteractiveMenuBrowser({
                                   .map((i) => i.name)
                                   .join(", ")}
                               </strong>{" "}
-                              solo se prepara en{" "}
-                              {locationMap.get(
-                                conflictingLocationItems[0]
-                                  ?.exclusiveLocationId ?? ""
-                              )?.name ?? "otra sede"}
-                              .
+                              está agotado o es exclusivo de otra sede.
                             </p>
-                            {conflictingLocationItems[0]
-                              ?.exclusiveLocationId && (
+                            <div className="mt-2 flex flex-wrap gap-2">
                               <button
                                 type="button"
-                                onClick={() =>
-                                  setDispatchLocationId(
-                                    conflictingLocationItems[0]!
-                                      .exclusiveLocationId!
-                                  )
-                                }
-                                className="mt-2 rounded-full bg-ember px-3 py-1 text-xs font-semibold text-ivory"
+                                onClick={() => {
+                                  const badKeys = new Set(
+                                    conflictingLocationItems.map((i) => i.key)
+                                  );
+                                  setTableSelection((prev) =>
+                                    prev.filter((it) => !badKeys.has(it.key))
+                                  );
+                                }}
+                                className="rounded-full bg-ember px-3 py-1 text-xs font-semibold text-ivory"
                               >
-                                Cambiar despacho a{" "}
-                                {
-                                  locationMap.get(
-                                    conflictingLocationItems[0]
-                                      .exclusiveLocationId
-                                  )?.name
-                                }
+                                Retirar de mi pedido
                               </button>
-                            )}
+                              {conflictingLocationItems[0]
+                                ?.exclusiveLocationId && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDispatchLocationId(
+                                      conflictingLocationItems[0]!
+                                        .exclusiveLocationId!
+                                    )
+                                  }
+                                  className="rounded-full border border-border-strong bg-canvas px-3 py-1 text-xs font-semibold text-ink"
+                                >
+                                  Cambiar despacho a{" "}
+                                  {
+                                    locationMap.get(
+                                      conflictingLocationItems[0]
+                                        .exclusiveLocationId
+                                    )?.name
+                                  }
+                                </button>
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -2559,7 +2919,7 @@ export function InteractiveMenuBrowser({
                         <div className="space-y-2 rounded-2xl border border-ember/25 bg-surface-accent/65 p-3.5 text-xs">
                           <div className="flex items-start justify-between gap-2">
                             <p className="font-mono text-xs leading-relaxed text-ink">
-                              {deliveryConfig.transferInstructions}
+                              {effectiveDeliveryConfig.transferInstructions}
                             </p>
                             <button
                               type="button"

@@ -1,7 +1,9 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import type { Database } from "@/types/database.types";
+
+type SupabaseSchema = Omit<Database, "__InternalSupabase">;
 
 function getSupabasePublicCredentials() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -22,7 +24,7 @@ function getSupabasePublicCredentials() {
  */
 export function createSupabasePublicServerClient() {
   const { url, key } = getSupabasePublicCredentials();
-  return createClient<Database>(url, key, {
+  return createClient<SupabaseSchema>(url, key, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
@@ -34,11 +36,13 @@ export function createSupabasePublicServerClient() {
  * Cookie-aware SSR client for authenticated Dashboard operations and user verification.
  * Always use `supabase.auth.getUser()` on the server — never `getSession()`.
  */
-export async function createSupabaseAuthenticatedServerClient() {
+export async function createSupabaseAuthenticatedServerClient(): Promise<
+  SupabaseClient<SupabaseSchema>
+> {
   const { url, key } = getSupabasePublicCredentials();
   const cookieStore = await cookies();
 
-  return createServerClient<Database>(url, key, {
+  return createServerClient<SupabaseSchema>(url, key, {
     cookies: {
       getAll() {
         return cookieStore.getAll();
@@ -55,5 +59,5 @@ export async function createSupabaseAuthenticatedServerClient() {
         }
       },
     },
-  });
+  }) as unknown as SupabaseClient<SupabaseSchema>;
 }

@@ -21,6 +21,7 @@ export const directOrderItemSchema = z.object({
   quantity: z.number().int().min(1).max(99),
   unitPrice: z.number().min(0).max(50000000),
   options: z.array(z.string().max(120)).max(12).default([]),
+  optionIds: z.array(z.string().uuid()).max(12).optional(),
 });
 
 export const publicDirectOrderSchema = z
