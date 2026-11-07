@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import QRCode from "qrcode";
@@ -35,6 +35,13 @@ import {
   Layers,
   Crown,
   Globe,
+  Plus,
+  Trash2,
+  FolderEdit,
+  ChevronLeft,
+  ChevronRight,
+  Award,
+  Flame,
 } from "lucide-react";
 import {
   formatCurrency,
@@ -48,6 +55,7 @@ import {
   type SimPlanPreset,
 } from "@/lib/saas-entitlements";
 import type {
+  OperationalCategoryItem,
   OperationalProductItem,
   OperationalInquiryItem,
   OperationalDirectOrderItem,
@@ -63,7 +71,16 @@ import {
   updateEventInquiryOperationalStateAction,
   updateDirectOrderStatusAction,
   setSimPlanCookieAction,
+  adminDeleteProductAction,
 } from "@/modules/admin/actions";
+import {
+  CatalogFacetedFilters,
+  INITIAL_FACETED_FILTER_STATE,
+  type FacetedFilterState,
+} from "./catalog-faceted-filters";
+import { ProductEditorModal } from "./product-editor-modal";
+import { CategoryManagerModal } from "./category-manager-modal";
+import { DeleteConfirmModal } from "./delete-confirm-modal";
 
 type ConsoleTabId = "platos" | "pedidos" | "eventos" | "qr";
 
@@ -75,6 +92,7 @@ interface InteractiveDashboardConsoleProps {
   selectedLocation?: LocationRow | null;
   initialTab?: string;
   deliveryEnabled?: boolean;
+  initialCategories?: OperationalCategoryItem[];
   initialProducts: OperationalProductItem[];
   initialInquiries: OperationalInquiryItem[];
   initialDirectOrders: OperationalDirectOrderItem[];
@@ -195,6 +213,7 @@ export function InteractiveDashboardConsole({
   selectedLocation = null,
   initialTab,
   deliveryEnabled = true,
+  initialCategories = [],
   initialProducts,
   initialInquiries,
   initialDirectOrders,
@@ -207,6 +226,31 @@ export function InteractiveDashboardConsole({
   const [activeTab, setActiveTab] = useState<ConsoleTabId>(() =>
     resolveInitialTab(initialTab)
   );
+  const [categories, setCategories] = useState<OperationalCategoryItem[]>(() =>
+    initialCategories && initialCategories.length > 0
+      ? initialCategories
+      : Array.from(
+          new Map(
+            initialProducts.map((p) => [
+              p.category_id,
+              {
+                id: p.category_id,
+                menu_id: "menu-default",
+                slug: p.category_id,
+                name: p.category_name,
+                subtitle: null,
+                description: null,
+                display_mode: "editorial_grid" as const,
+                is_active: true,
+                sort_order: 1,
+                products_count: initialProducts.filter(
+                  (item) => item.category_id === p.category_id
+                ).length,
+              },
+            ])
+          ).values()
+        )
+  );
   const [products, setProducts] =
     useState<OperationalProductItem[]>(initialProducts);
   const [inquiries, setInquiries] =
@@ -216,10 +260,19 @@ export function InteractiveDashboardConsole({
   const [auditLogs, setAuditLogs] =
     useState<OperationalAuditLogItem[]>(initialAuditLogs);
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<
-    "all" | "available" | "sold_out" | "hidden"
-  >("all");
+  // Faceted Filter State
+  const [facetedFilters, setFacetedFilters] = useState<FacetedFilterState>(
+    INITIAL_FACETED_FILTER_STATE
+  );
+  const [isFacetedExpanded, setIsFacetedExpanded] = useState(false);
+
+  // Modals State
+  const [productToEdit, setProductToEdit] =
+    useState<OperationalProductItem | null>(null);
+  const [isCreateProductOpen, setIsCreateProductOpen] = useState(false);
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
+  const [productToDelete, setProductToDelete] =
+    useState<OperationalProductItem | null>(null);
 
   const [editingPriceId, setEditingPriceId] = useState<string | null>(null);
   const [priceDraft, setPriceDraft] = useState<string>("");
@@ -277,20 +330,201 @@ export function InteractiveDashboardConsole({
 
   const estimatedCommissionSavings = Math.round(totalDirectSalesAmount * 0.28);
 
-  const filteredProducts = products.filter((prod) => {
-    if (statusFilter !== "all" && prod.availability_status !== statusFilter) {
-      return false;
+  // Faceted Filtering & Sorting for 100+ dishes
+  const processedProducts = useMemo(() => {
+    let list = [...products];
+
+    // 1. Text Search
+    if (facetedFilters.searchQuery.trim().length > 0) {
+      const q = facetedFilters.searchQuery.toLowerCase().trim();
+      list = list.filter((p) => {
+        const nameMatch = p.name.toLowerCase().includes(q);
+        const catMatch = p.category_name.toLowerCase().includes(q);
+        const portionMatch = (p.portion_label ?? "").toLowerCase().includes(q);
+        const descMatch = (p.short_description ?? "").toLowerCase().includes(q);
+        const locMatch = (p.exclusive_location_name ?? "")
+          .toLowerCase()
+          .includes(q);
+        const badgeMatch = (p.badges ?? []).some((b) =>
+          b.toLowerCase().includes(q)
+        );
+        return (
+          nameMatch ||
+          catMatch ||
+          portionMatch ||
+          descMatch ||
+          locMatch ||
+          badgeMatch
+        );
+      });
     }
-    if (searchQuery.trim().length > 0) {
-      const q = searchQuery.toLowerCase();
-      return (
-        prod.name.toLowerCase().includes(q) ||
-        prod.category_name.toLowerCase().includes(q) ||
-        (prod.exclusive_location_name ?? "").toLowerCase().includes(q)
+
+    // 2. Category Filter
+    if (facetedFilters.categoryId !== "all") {
+      list = list.filter((p) => p.category_id === facetedFilters.categoryId);
+    }
+
+    // 3. Availability Status Filter
+    if (facetedFilters.availabilityStatus !== "all") {
+      list = list.filter(
+        (p) => p.availability_status === facetedFilters.availabilityStatus
       );
     }
-    return true;
-  });
+
+    // 4. Regional Price Differential Filter
+    if (facetedFilters.onlyRegionalDiff) {
+      list = list.filter((p) => {
+        if (selectedLocation) {
+          return (
+            p.price_override != null &&
+            p.global_base_price != null &&
+            Number(p.price_override) !== Number(p.global_base_price)
+          );
+        }
+        return (p.location_overrides_count ?? 0) > 0;
+      });
+    }
+
+    // 5. Insignias / Flags Filters
+    if (facetedFilters.onlyFeatured) {
+      list = list.filter((p) => p.is_featured);
+    }
+    if (facetedFilters.onlyChefChoice) {
+      list = list.filter((p) => p.is_chef_choice);
+    }
+    if (facetedFilters.onlyNew) {
+      list = list.filter((p) => Boolean(p.is_new));
+    }
+    if (facetedFilters.onlyWithOptions) {
+      list = list.filter((p) => (p.option_groups ?? []).length > 0);
+    }
+
+    // 6. Price Range Filters
+    if (facetedFilters.priceMin !== "") {
+      const min = Number(facetedFilters.priceMin);
+      if (!isNaN(min)) {
+        list = list.filter((p) => Number(p.base_price) >= min);
+      }
+    }
+    if (facetedFilters.priceMax !== "") {
+      const max = Number(facetedFilters.priceMax);
+      if (!isNaN(max)) {
+        list = list.filter((p) => Number(p.base_price) <= max);
+      }
+    }
+
+    // 7. Sorting
+    switch (facetedFilters.sortBy) {
+      case "name_asc":
+        list.sort((a, b) => a.name.localeCompare(b.name, "es"));
+        break;
+      case "name_desc":
+        list.sort((a, b) => b.name.localeCompare(a.name, "es"));
+        break;
+      case "price_asc":
+        list.sort((a, b) => Number(a.base_price) - Number(b.base_price));
+        break;
+      case "price_desc":
+        list.sort((a, b) => Number(b.base_price) - Number(a.base_price));
+        break;
+      case "sort_order":
+      default:
+        break;
+    }
+
+    return list;
+  }, [products, facetedFilters, selectedLocation]);
+
+  const totalFilteredCount = processedProducts.length;
+  const pageSize = facetedFilters.pageSize;
+  const totalPages =
+    pageSize > 0 ? Math.ceil(totalFilteredCount / pageSize) : 1;
+  const currentPage = Math.min(
+    Math.max(1, facetedFilters.currentPage),
+    totalPages || 1
+  );
+
+  const paginatedProducts = useMemo(() => {
+    if (pageSize <= 0) return processedProducts;
+    const start = (currentPage - 1) * pageSize;
+    return processedProducts.slice(start, start + pageSize);
+  }, [processedProducts, pageSize, currentPage]);
+
+  function handleProductSaved(
+    savedProduct: OperationalProductItem,
+    isNew: boolean
+  ) {
+    if (isNew) {
+      setProducts((curr) => [savedProduct, ...curr]);
+      setFeedbackBanner({
+        type: "success",
+        text: `Plato "${savedProduct.name}" creado con éxito en PostgreSQL.`,
+      });
+    } else {
+      setProducts((curr) =>
+        curr.map((p) => (p.id === savedProduct.id ? savedProduct : p))
+      );
+      setFeedbackBanner({
+        type: "success",
+        text: `Plato "${savedProduct.name}" actualizado con éxito en PostgreSQL.`,
+      });
+    }
+    setCategories((curr) =>
+      curr.map((c) =>
+        c.id === savedProduct.category_id
+          ? {
+              ...c,
+              products_count: isNew ? c.products_count + 1 : c.products_count,
+            }
+          : c
+      )
+    );
+  }
+
+  function handleConfirmDeleteProduct() {
+    if (!productToDelete) return;
+
+    const prodId = productToDelete.id;
+    const prodName = productToDelete.name;
+    const prodCatId = productToDelete.category_id;
+
+    startTransition(async () => {
+      const res = await adminDeleteProductAction({
+        restaurantSlug,
+        productId: prodId,
+      });
+
+      if (!res.ok) {
+        setFeedbackBanner({
+          type: "error",
+          text: res.error ?? "No fue posible eliminar el plato.",
+        });
+        setProductToDelete(null);
+        return;
+      }
+
+      setProducts((curr) => curr.filter((p) => p.id !== prodId));
+      setCategories((curr) =>
+        curr.map((c) =>
+          c.id === prodCatId
+            ? { ...c, products_count: Math.max(0, c.products_count - 1) }
+            : c
+        )
+      );
+      setFeedbackBanner({
+        type: "success",
+        text: `Plato "${prodName}" eliminado permanentemente de la carta.`,
+      });
+      setProductToDelete(null);
+    });
+  }
+
+  function handleCategoriesChanged(
+    updatedCategories: OperationalCategoryItem[]
+  ) {
+    setCategories(updatedCategories);
+    router.refresh();
+  }
 
   function buildDashboardHref(
     locationSlug: string | null,
@@ -1199,10 +1433,11 @@ export function InteractiveDashboardConsole({
         </button>
       </div>
 
-      {/* TAB 1: LIVE CATALOG & 1-CLICK AVAILABILITY ("86ing") */}
+      {/* TAB 1: LIVE CATALOG & 1-CLICK AVAILABILITY ("86ing") & CRUD */}
       {activeTab === "platos" && (
-        <div className="overflow-hidden rounded-3xl border border-hairline bg-canvas-elevated">
-          <div className="flex flex-col gap-4 border-b border-hairline px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="space-y-6">
+          {/* Header & Quick Action Buttons */}
+          <div className="flex flex-col gap-4 rounded-3xl border border-hairline bg-canvas-elevated p-6 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="mb-1 flex flex-wrap items-center gap-2">
                 <span
@@ -1227,345 +1462,151 @@ export function InteractiveDashboardConsole({
                     </>
                   )}
                 </span>
+                <span className="rounded-full bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
+                  {products.length} platos en carta · {categories.length} categorías
+                </span>
               </div>
               <h2 className="font-display text-2xl font-semibold text-ink">
-                Control de Disponibilidad en Cocina y Precios
+                Control de Carta, Cocina &amp; Precios
               </h2>
-              <p className="text-xs text-ink-muted">
+              <p className="mt-1 text-xs text-ink-muted">
                 {isReadOnlyMutations
-                  ? "Vista de lectura: reactiva la membresía mensual para editar precios o disponibilidad en tiempo real."
+                  ? "Vista de lectura: reactiva la membresía mensual para crear, editar o eliminar platos y categorías."
                   : selectedLocation
-                    ? `Los cambios aquí aplican únicamente a ${selectedLocation.name} (${selectedLocation.city}) sin alterar las demás sedes.`
-                    : "Marca un plato como Agotado hoy u Oculto en 1 clic. El cambio se guarda en PostgreSQL al instante."}
+                    ? `Precios y disponibilidad aplican de forma exclusiva a ${selectedLocation.name} (${selectedLocation.city}).`
+                    : "Crea platos, gestiona categorías, ajusta precios y cambia disponibilidad en 1 clic."}
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative min-w-[220px] flex-1 sm:flex-initial">
-                <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-muted" />
-                <input
-                  suppressHydrationWarning
-                  type="search"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={
-                    isMultiLocation
-                      ? "Buscar plato, categoría o sede..."
-                      : "Buscar plato o categoría..."
-                  }
-                  className="h-10 w-full rounded-full border border-border-strong bg-canvas pr-4 pl-9 text-base text-ink placeholder:text-ink-subtle focus:border-ember focus:outline-none sm:text-xs"
-                />
-              </div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                disabled={isReadOnlyMutations}
+                onClick={() => setIsCategoryManagerOpen(true)}
+                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-border-strong bg-canvas px-4 py-2 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FolderEdit className="size-4 text-ember" />
+                <span>Gestionar Categorías ({categories.length})</span>
+              </button>
 
-              <div className="flex rounded-full border border-hairline bg-canvas p-1 text-xs">
-                {(
-                  [
-                    { id: "all", label: "Todos" },
-                    { id: "available", label: "Disponibles" },
-                    { id: "sold_out", label: "Agotados" },
-                    { id: "hidden", label: "Ocultos" },
-                  ] as const
-                ).map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setStatusFilter(tab.id)}
-                    className={`rounded-full px-3 py-1 font-semibold transition ${
-                      statusFilter === tab.id
-                        ? "bg-ink text-ivory"
-                        : "text-ink-muted hover:text-ink"
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
+              <button
+                type="button"
+                disabled={isReadOnlyMutations}
+                onClick={() => setIsCreateProductOpen(true)}
+                className="inline-flex min-h-10 items-center gap-2 rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory shadow-2xs transition hover:bg-ember-hover disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus className="size-4" />
+                <span>Nuevo Plato</span>
+              </button>
             </div>
           </div>
 
-          {filteredProducts.length === 0 ? (
-            <div className="p-10 text-center">
-              <p className="font-display text-2xl font-semibold text-ink">
-                No hay platos que coincidan con este filtro
-              </p>
-              <p className="mt-1 text-xs text-ink-muted">
-                Prueba restableciendo el estado o limpiando el texto de búsqueda.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery("");
-                  setStatusFilter("all");
-                }}
-                className="mt-4 inline-flex items-center rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory"
-              >
-                Ver todos los platos
-              </button>
-            </div>
-          ) : (
-            <>
-              {/* Mobile Responsive Cards (< md) */}
-              <div className="divide-y divide-hairline md:hidden">
-                {filteredProducts.map((product) => {
-                  const hasRegionalPrice =
-                    selectedLocation != null &&
-                    product.price_override != null &&
-                    product.global_base_price != null &&
-                    Number(product.price_override) !==
-                      Number(product.global_base_price);
+          {/* Faceted Filter Bar for 100+ Dishes */}
+          <CatalogFacetedFilters
+            categories={categories}
+            allProducts={products}
+            filters={facetedFilters}
+            onChange={setFacetedFilters}
+            isExpanded={isFacetedExpanded}
+            onToggleExpanded={() => setIsFacetedExpanded((prev) => !prev)}
+            currencyCode={currencyCode}
+            hasSelectedLocation={Boolean(selectedLocation)}
+            selectedLocationName={selectedLocation?.name}
+          />
 
-                  return (
-                    <div key={product.id} className="space-y-3 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <span className="text-xs font-semibold uppercase tracking-wider text-ember">
-                            {product.category_name}
-                          </span>
-                          <h3 className="font-semibold text-ink">
-                            {product.name}
-                          </h3>
-                          {isMultiLocation && product.exclusive_location_name && (
-                            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
-                              <MapPin className="size-3" />
-                              <span>
-                                Exclusivo {product.exclusive_location_name}
+          {/* Dish List Container */}
+          <div className="overflow-hidden rounded-3xl border border-hairline bg-canvas-elevated">
+            {totalFilteredCount === 0 ? (
+              <div className="p-12 text-center">
+                <UtensilsCrossed className="mx-auto size-10 text-ink-muted/40" />
+                <p className="mt-3 font-display text-2xl font-semibold text-ink">
+                  No hay platos que coincidan con estos filtros
+                </p>
+                <p className="mt-1 text-xs text-ink-muted">
+                  Prueba restableciendo los filtros de categoría, precio o insignias.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setFacetedFilters(INITIAL_FACETED_FILTER_STATE)}
+                  className="mt-4 inline-flex items-center rounded-full bg-ember px-4 py-2 text-xs font-semibold text-ivory transition hover:bg-ember-hover"
+                >
+                  Restablecer filtros y ver todos los platos
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Mobile Responsive Cards (< md) */}
+                <div className="divide-y divide-hairline md:hidden">
+                  {paginatedProducts.map((product) => {
+                    const hasRegionalPrice =
+                      selectedLocation != null &&
+                      product.price_override != null &&
+                      product.global_base_price != null &&
+                      Number(product.price_override) !==
+                        Number(product.global_base_price);
+                    const optGroupsCount = (product.option_groups ?? []).length;
+
+                    return (
+                      <div key={product.id} className="space-y-3 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[11px] font-semibold uppercase tracking-wider text-ember">
+                                {product.category_name}
                               </span>
-                            </span>
-                          )}
-                          {!selectedLocation &&
-                            (product.location_overrides_count ?? 0) > 0 && (
-                              <span className="mt-1 block text-[11px] font-medium text-ember">
-                                Con diferencial en{" "}
-                                {product.location_overrides_count} sede(s)
+                              {product.is_featured && (
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-warn/15 px-2 py-0.2 text-[10px] font-bold text-amber-warn">
+                                  <Flame className="size-2.5" />
+                                  Destacado
+                                </span>
+                              )}
+                              {product.is_chef_choice && (
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-ember/15 px-2 py-0.2 text-[10px] font-bold text-ember">
+                                  <Award className="size-2.5" />
+                                  Chef
+                                </span>
+                              )}
+                              {product.is_new && (
+                                <span className="inline-flex items-center gap-0.5 rounded-full bg-sage/15 px-2 py-0.2 text-[10px] font-bold text-sage">
+                                  Nuevo
+                                </span>
+                              )}
+                            </div>
+                            <h3 className="font-semibold text-ink">
+                              {product.name}
+                            </h3>
+                            {product.short_description && (
+                              <p className="mt-0.5 line-clamp-2 text-xs text-ink-muted">
+                                {product.short_description}
+                              </p>
+                            )}
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+                              <span>{product.portion_label ?? "Porción estándar"}</span>
+                              {optGroupsCount > 0 && (
+                                <span className="rounded-full border border-hairline bg-canvas px-2 py-0.5 text-[10px] font-medium text-ink-muted">
+                                  {optGroupsCount}{" "}
+                                  {optGroupsCount === 1 ? "grupo opciones" : "grupos opciones"}
+                                </span>
+                              )}
+                            </div>
+                            {isMultiLocation && product.exclusive_location_name && (
+                              <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-surface-accent px-2 py-0.5 text-[11px] font-semibold text-ember">
+                                <MapPin className="size-3" />
+                                <span>Exclusivo {product.exclusive_location_name}</span>
                               </span>
                             )}
-                        </div>
-
-                        <div className="text-right">
-                          {editingPriceId === product.id &&
-                          !isReadOnlyMutations ? (
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                pattern="[0-9]*"
-                                value={priceDraft}
-                                onChange={(e) =>
-                                  setPriceDraft(
-                                    sanitizeNumericInput(e.target.value, 8)
-                                  )
-                                }
-                                className="w-24 rounded-lg border border-ember bg-canvas px-2 py-1 font-mono text-base text-ink sm:text-xs"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleSavePrice(product)}
-                                className="rounded-lg bg-ember p-1.5 text-ivory"
-                                aria-label="Guardar precio"
-                              >
-                                <Save className="size-3.5" />
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled={isReadOnlyMutations}
-                              onClick={() => {
-                                setEditingPriceId(product.id);
-                                setPriceDraft(String(product.base_price));
-                              }}
-                              className="inline-flex items-center gap-1 font-mono text-sm font-semibold text-ink hover:text-ember disabled:cursor-not-allowed disabled:opacity-65"
-                            >
-                              <span>
-                                {formatCurrency(
-                                  Number(product.base_price),
-                                  currencyCode
-                                )}
-                              </span>
-                              {!isReadOnlyMutations && (
-                                <Pencil className="size-3.5 text-ink-muted" />
+                            {!selectedLocation &&
+                              (product.location_overrides_count ?? 0) > 0 && (
+                                <span className="mt-1 block text-[11px] font-medium text-ember">
+                                  Diferencial en {product.location_overrides_count} sede(s)
+                                </span>
                               )}
-                            </button>
-                          )}
-                          {hasRegionalPrice && (
-                            <span className="block text-[11px] text-ember">
-                              Tarifa {selectedLocation.city}
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                          </div>
 
-                      <div className="grid grid-cols-3 gap-1.5 pt-1">
-                        <button
-                          type="button"
-                          disabled={isPending || isReadOnlyMutations}
-                          onClick={() =>
-                            handleAvailabilityChange(product, "available")
-                          }
-                          className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                            product.availability_status === "available"
-                              ? "bg-sage text-ivory shadow-2xs"
-                              : "border border-hairline bg-canvas text-ink-muted"
-                          }`}
-                        >
-                          Disponible
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isPending || isReadOnlyMutations}
-                          onClick={() =>
-                            handleAvailabilityChange(product, "sold_out")
-                          }
-                          className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                            product.availability_status === "sold_out"
-                              ? "bg-amber-warn text-ivory shadow-2xs"
-                              : "border border-hairline bg-canvas text-ink-muted"
-                          }`}
-                        >
-                          Agotado hoy
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isPending || isReadOnlyMutations}
-                          onClick={() =>
-                            handleAvailabilityChange(product, "hidden")
-                          }
-                          className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                            product.availability_status === "hidden"
-                              ? "bg-ink text-ivory shadow-2xs"
-                              : "border border-hairline bg-canvas text-ink-muted"
-                          }`}
-                        >
-                          Ocultar
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Desktop Operational Table (>= md) */}
-              <div className="hidden overflow-x-auto md:block">
-                <table className="w-full text-left text-sm">
-                  <thead className="border-b border-hairline bg-canvas/60 text-xs font-semibold uppercase tracking-wider text-ink-muted">
-                    <tr>
-                      <th className="px-6 py-3.5">Plato / Referencia</th>
-                      <th className="px-6 py-3.5">
-                        {isMultiLocation ? "Categoría & Alcance" : "Categoría"}
-                      </th>
-                      <th className="px-6 py-3.5">
-                        {selectedLocation
-                          ? `Estado en ${selectedLocation.name}`
-                          : "Control de Estado en Vivo"}
-                      </th>
-                      <th className="px-6 py-3.5 text-right">
-                        {selectedLocation
-                          ? `Precio en ${selectedLocation.city}`
-                          : "Precio Base en Carta"}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-hairline">
-                    {filteredProducts.map((product) => {
-                      const hasRegionalPrice =
-                        selectedLocation != null &&
-                        product.price_override != null &&
-                        product.global_base_price != null &&
-                        Number(product.price_override) !==
-                          Number(product.global_base_price);
-
-                      return (
-                        <tr
-                          key={product.id}
-                          className="transition hover:bg-canvas/40"
-                        >
-                          <td className="px-6 py-4">
-                            <p className="font-semibold text-ink">
-                              {product.name}
-                            </p>
-                            <p className="text-xs text-ink-muted">
-                              {product.portion_label ?? "Porción estándar"}
-                            </p>
-                          </td>
-                          <td className="px-6 py-4 text-xs text-ink-muted">
-                            <span className="font-medium text-ink">
-                              {product.category_name}
-                            </span>
-                            {isMultiLocation &&
-                              (product.exclusive_location_name ? (
-                                <span className="mt-1 flex w-fit items-center gap-1 rounded-full bg-surface-accent px-2.5 py-0.5 text-xs font-semibold text-ember">
-                                  <MapPin className="size-3" />
-                                  <span>
-                                    Exclusivo {product.exclusive_location_name}
-                                  </span>
-                                </span>
-                              ) : !selectedLocation &&
-                                (product.location_overrides_count ?? 0) > 0 ? (
-                                <span className="mt-1 block text-xs font-medium text-ember">
-                                  Diferencial activo en{" "}
-                                  {product.location_overrides_count} sede(s)
-                                </span>
-                              ) : (
-                                <span className="mt-0.5 block text-xs text-ink-muted">
-                                  {selectedLocation
-                                    ? `Ofrecido en ${selectedLocation.city}`
-                                    : "Disponible en todas las sedes"}
-                                </span>
-                              ))}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="inline-flex rounded-full border border-hairline bg-canvas p-1">
-                              <button
-                                type="button"
-                                disabled={isPending || isReadOnlyMutations}
-                                onClick={() =>
-                                  handleAvailabilityChange(product, "available")
-                                }
-                                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                                  product.availability_status === "available"
-                                    ? "bg-sage text-ivory shadow-2xs"
-                                    : "text-ink-muted hover:text-ink"
-                                }`}
-                              >
-                                <span className="size-1.5 rounded-full bg-current" />
-                                <span>Disponible</span>
-                              </button>
-                              <button
-                                type="button"
-                                disabled={isPending || isReadOnlyMutations}
-                                onClick={() =>
-                                  handleAvailabilityChange(product, "sold_out")
-                                }
-                                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                                  product.availability_status === "sold_out"
-                                    ? "bg-amber-warn text-ivory shadow-2xs"
-                                    : "text-ink-muted hover:text-ink"
-                                }`}
-                              >
-                                <span className="size-1.5 rounded-full bg-current" />
-                                <span>Agotado hoy</span>
-                              </button>
-                              <button
-                                type="button"
-                                disabled={isPending || isReadOnlyMutations}
-                                onClick={() =>
-                                  handleAvailabilityChange(product, "hidden")
-                                }
-                                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                                  product.availability_status === "hidden"
-                                    ? "bg-ink text-ivory shadow-2xs"
-                                    : "text-ink-muted hover:text-ink"
-                                }`}
-                              >
-                                <EyeOff className="size-3" />
-                                <span>Oculto</span>
-                              </button>
-                            </div>
-                          </td>
-                          <td className="tabular-price px-6 py-4 text-right font-mono font-semibold text-ink">
+                          <div className="shrink-0 text-right">
                             {editingPriceId === product.id &&
                             !isReadOnlyMutations ? (
-                              <div className="inline-flex items-center justify-end gap-1.5">
+                              <div className="flex items-center gap-1">
                                 <input
                                   type="text"
                                   inputMode="numeric"
@@ -1576,26 +1617,19 @@ export function InteractiveDashboardConsole({
                                       sanitizeNumericInput(e.target.value, 8)
                                     )
                                   }
-                                  className="w-28 rounded-xl border border-ember bg-canvas px-2.5 py-1 text-right font-mono text-xs text-ink focus:outline-none"
+                                  className="w-24 rounded-lg border border-ember bg-canvas px-2 py-1 font-mono text-base text-ink sm:text-xs"
                                 />
                                 <button
                                   type="button"
                                   onClick={() => handleSavePrice(product)}
-                                  className="inline-flex items-center gap-1 rounded-xl bg-ember px-2.5 py-1 font-sans text-xs font-semibold text-ivory hover:bg-ember-hover"
+                                  className="rounded-lg bg-ember p-1.5 text-ivory"
+                                  aria-label="Guardar precio"
                                 >
                                   <Save className="size-3.5" />
-                                  <span>Guardar</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingPriceId(null)}
-                                  className="font-sans text-xs text-ink-muted hover:text-ink"
-                                >
-                                  ✕
                                 </button>
                               </div>
                             ) : (
-                              <div className="flex flex-col items-end">
+                              <div>
                                 <button
                                   type="button"
                                   disabled={isReadOnlyMutations}
@@ -1603,12 +1637,7 @@ export function InteractiveDashboardConsole({
                                     setEditingPriceId(product.id);
                                     setPriceDraft(String(product.base_price));
                                   }}
-                                  title={
-                                    isReadOnlyMutations
-                                      ? "Edición bloqueada en Modo Vitrina"
-                                      : "Haz clic para editar el precio en vivo"
-                                  }
-                                  className="inline-flex items-center justify-end gap-1.5 rounded-xl px-2.5 py-1 transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-65"
+                                  className="inline-flex items-center gap-1 font-mono text-sm font-semibold text-ink hover:text-ember disabled:cursor-not-allowed disabled:opacity-65"
                                 >
                                   <span>
                                     {formatCurrency(
@@ -1616,33 +1645,510 @@ export function InteractiveDashboardConsole({
                                       currencyCode
                                     )}
                                   </span>
-                                  {!isReadOnlyMutations ? (
+                                  {!isReadOnlyMutations && (
                                     <Pencil className="size-3.5 text-ink-muted" />
-                                  ) : (
-                                    <Lock className="size-3 text-ink-muted" />
                                   )}
                                 </button>
+                                {product.compare_at_price != null &&
+                                  Number(product.compare_at_price) >
+                                    Number(product.base_price) && (
+                                    <span className="block font-mono text-[11px] text-ink-muted line-through">
+                                      {formatCurrency(
+                                        Number(product.compare_at_price),
+                                        currencyCode
+                                      )}
+                                    </span>
+                                  )}
                                 {hasRegionalPrice && (
-                                  <span className="font-sans text-[11px] font-medium text-ember">
-                                    Tarifa {selectedLocation.city} (Base:{" "}
-                                    {formatCurrency(
-                                      Number(product.global_base_price),
-                                      currencyCode
-                                    )}
-                                    )
+                                  <span className="block text-[10px] text-ember">
+                                    Tarifa {selectedLocation.city}
                                   </span>
                                 )}
                               </div>
                             )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
+                          </div>
+                        </div>
+
+                        {/* 1-Click Availability Controls */}
+                        <div className="grid grid-cols-3 gap-1.5 pt-1">
+                          <button
+                            type="button"
+                            disabled={isPending || isReadOnlyMutations}
+                            onClick={() =>
+                              handleAvailabilityChange(product, "available")
+                            }
+                            className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                              product.availability_status === "available"
+                                ? "bg-sage text-ivory shadow-2xs"
+                                : "border border-hairline bg-canvas text-ink-muted"
+                            }`}
+                          >
+                            Disponible
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isPending || isReadOnlyMutations}
+                            onClick={() =>
+                              handleAvailabilityChange(product, "sold_out")
+                            }
+                            className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                              product.availability_status === "sold_out"
+                                ? "bg-amber-warn text-ivory shadow-2xs"
+                                : "border border-hairline bg-canvas text-ink-muted"
+                            }`}
+                          >
+                            Agotado hoy
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isPending || isReadOnlyMutations}
+                            onClick={() =>
+                              handleAvailabilityChange(product, "hidden")
+                            }
+                            className={`rounded-xl px-2.5 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                              product.availability_status === "hidden"
+                                ? "bg-ink text-ivory shadow-2xs"
+                                : "border border-hairline bg-canvas text-ink-muted"
+                            }`}
+                          >
+                            Ocultar
+                          </button>
+                        </div>
+
+                        {/* Edit & Delete Actions in Mobile */}
+                        <div className="flex items-center justify-end gap-2 border-t border-hairline/60 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => setProductToEdit(product)}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-canvas px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-ember hover:text-ember"
+                          >
+                            <Pencil className="size-3 text-ember" />
+                            <span>Editar</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={
+                              isReadOnlyMutations ||
+                              product.id === "corte-secreto-pruebas-internas"
+                            }
+                            onClick={() => setProductToDelete(product)}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-canvas px-3 py-1.5 text-xs font-semibold text-crimson transition hover:bg-crimson/10 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Trash2 className="size-3" />
+                            <span>Eliminar</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop Operational Table (>= md) */}
+                <div className="hidden overflow-x-auto md:block">
+                  <table className="w-full text-left text-sm">
+                    <thead className="border-b border-hairline bg-canvas/60 text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                      <tr>
+                        <th className="px-6 py-3.5">Plato / Foto / Insignias</th>
+                        <th className="px-6 py-3.5">Categoría &amp; Modificadores</th>
+                        <th className="px-6 py-3.5">
+                          {selectedLocation
+                            ? `Estado en ${selectedLocation.name}`
+                            : "Control de Estado en Vivo"}
+                        </th>
+                        <th className="px-6 py-3.5 text-right">
+                          {selectedLocation
+                            ? `Precio en ${selectedLocation.city}`
+                            : "Precio Base en Carta"}
+                        </th>
+                        <th className="px-6 py-3.5 text-center">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-hairline">
+                      {paginatedProducts.map((product) => {
+                        const hasRegionalPrice =
+                          selectedLocation != null &&
+                          product.price_override != null &&
+                          product.global_base_price != null &&
+                          Number(product.price_override) !==
+                            Number(product.global_base_price);
+                        const optGroupsCount = (product.option_groups ?? []).length;
+
+                        return (
+                          <tr
+                            key={product.id}
+                            className="transition hover:bg-canvas/40"
+                          >
+                            <td className="px-6 py-4">
+                              <div className="flex items-start gap-3">
+                                {product.image_url ? (
+                                  <img
+                                    src={product.image_url}
+                                    alt={product.image_alt ?? product.name}
+                                    className="size-11 shrink-0 rounded-xl border border-hairline object-cover"
+                                  />
+                                ) : (
+                                  <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-hairline bg-canvas text-ink-muted">
+                                    <UtensilsCrossed className="size-4" />
+                                  </div>
+                                )}
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <p className="font-semibold text-ink">
+                                      {product.name}
+                                    </p>
+                                    {product.is_featured && (
+                                      <span
+                                        title="Plato destacado"
+                                        className="inline-flex items-center gap-0.5 rounded-full bg-amber-warn/15 px-2 py-0.2 text-[10px] font-bold text-amber-warn"
+                                      >
+                                        <Flame className="size-2.5" />
+                                        Destacado
+                                      </span>
+                                    )}
+                                    {product.is_chef_choice && (
+                                      <span
+                                        title="Recomendación del Chef"
+                                        className="inline-flex items-center gap-0.5 rounded-full bg-ember/15 px-2 py-0.2 text-[10px] font-bold text-ember"
+                                      >
+                                        <Award className="size-2.5" />
+                                        Chef
+                                      </span>
+                                    )}
+                                    {product.is_new && (
+                                      <span
+                                        title="Plato nuevo"
+                                        className="inline-flex items-center gap-0.5 rounded-full bg-sage/15 px-2 py-0.2 text-[10px] font-bold text-sage"
+                                      >
+                                        Nuevo
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-ink-muted">
+                                    {product.portion_label ?? "Porción estándar"}
+                                  </p>
+                                  {product.short_description && (
+                                    <p className="mt-0.5 max-w-sm truncate text-xs text-ink-muted/80">
+                                      {product.short_description}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+
+                            <td className="px-6 py-4 text-xs text-ink-muted">
+                              <span className="font-medium text-ink">
+                                {product.category_name}
+                              </span>
+                              {optGroupsCount > 0 ? (
+                                <span className="mt-1 flex w-fit items-center gap-1 rounded-full bg-surface-accent px-2 py-0.5 text-[11px] font-medium text-ember">
+                                  <span>
+                                    {optGroupsCount}{" "}
+                                    {optGroupsCount === 1
+                                      ? "grupo opciones"
+                                      : "grupos opciones"}
+                                  </span>
+                                </span>
+                              ) : (
+                                <span className="mt-0.5 block text-[11px] text-ink-muted">
+                                  Sin modificadores
+                                </span>
+                              )}
+
+                              {isMultiLocation &&
+                                (product.exclusive_location_name ? (
+                                  <span className="mt-1 flex w-fit items-center gap-1 rounded-full bg-surface-accent px-2 py-0.5 text-[11px] font-semibold text-ember">
+                                    <MapPin className="size-3" />
+                                    <span>
+                                      Exclusivo {product.exclusive_location_name}
+                                    </span>
+                                  </span>
+                                ) : !selectedLocation &&
+                                  (product.location_overrides_count ?? 0) > 0 ? (
+                                  <span className="mt-1 block text-xs font-medium text-ember">
+                                    Diferencial en{" "}
+                                    {product.location_overrides_count} sede(s)
+                                  </span>
+                                ) : (
+                                  <span className="mt-0.5 block text-[11px] text-ink-muted">
+                                    {selectedLocation
+                                      ? `Ofrecido en ${selectedLocation.city}`
+                                      : "Todas las sedes"}
+                                  </span>
+                                ))}
+                            </td>
+
+                            <td className="px-6 py-4">
+                              <div className="inline-flex rounded-full border border-hairline bg-canvas p-1">
+                                <button
+                                  type="button"
+                                  disabled={isPending || isReadOnlyMutations}
+                                  onClick={() =>
+                                    handleAvailabilityChange(product, "available")
+                                  }
+                                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                    product.availability_status === "available"
+                                      ? "bg-sage text-ivory shadow-2xs"
+                                      : "text-ink-muted hover:text-ink"
+                                  }`}
+                                >
+                                  <span className="size-1.5 rounded-full bg-current" />
+                                  <span>Disponible</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isPending || isReadOnlyMutations}
+                                  onClick={() =>
+                                    handleAvailabilityChange(product, "sold_out")
+                                  }
+                                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                    product.availability_status === "sold_out"
+                                      ? "bg-amber-warn text-ivory shadow-2xs"
+                                      : "text-ink-muted hover:text-ink"
+                                  }`}
+                                >
+                                  <span className="size-1.5 rounded-full bg-current" />
+                                  <span>Agotado hoy</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isPending || isReadOnlyMutations}
+                                  onClick={() =>
+                                    handleAvailabilityChange(product, "hidden")
+                                  }
+                                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                                    product.availability_status === "hidden"
+                                      ? "bg-ink text-ivory shadow-2xs"
+                                      : "text-ink-muted hover:text-ink"
+                                  }`}
+                                >
+                                  <EyeOff className="size-3" />
+                                  <span>Oculto</span>
+                                </button>
+                              </div>
+                            </td>
+
+                            <td className="tabular-price px-6 py-4 text-right font-mono font-semibold text-ink">
+                              {editingPriceId === product.id &&
+                              !isReadOnlyMutations ? (
+                                <div className="inline-flex items-center justify-end gap-1.5">
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
+                                    value={priceDraft}
+                                    onChange={(e) =>
+                                      setPriceDraft(
+                                        sanitizeNumericInput(e.target.value, 8)
+                                      )
+                                    }
+                                    className="w-28 rounded-xl border border-ember bg-canvas px-2.5 py-1 text-right font-mono text-xs text-ink focus:outline-none"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSavePrice(product)}
+                                    className="inline-flex items-center gap-1 rounded-xl bg-ember px-2.5 py-1 font-sans text-xs font-semibold text-ivory hover:bg-ember-hover"
+                                  >
+                                    <Save className="size-3.5" />
+                                    <span>Guardar</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingPriceId(null)}
+                                    className="font-sans text-xs text-ink-muted hover:text-ink"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-end">
+                                  <button
+                                    type="button"
+                                    disabled={isReadOnlyMutations}
+                                    onClick={() => {
+                                      setEditingPriceId(product.id);
+                                      setPriceDraft(String(product.base_price));
+                                    }}
+                                    title={
+                                      isReadOnlyMutations
+                                        ? "Edición bloqueada en Modo Vitrina"
+                                        : "Haz clic para editar el precio en vivo"
+                                    }
+                                    className="inline-flex items-center justify-end gap-1.5 rounded-xl px-2.5 py-1 transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-65"
+                                  >
+                                    <span>
+                                      {formatCurrency(
+                                        Number(product.base_price),
+                                        currencyCode
+                                      )}
+                                    </span>
+                                    {!isReadOnlyMutations ? (
+                                      <Pencil className="size-3.5 text-ink-muted" />
+                                    ) : (
+                                      <Lock className="size-3 text-ink-muted" />
+                                    )}
+                                  </button>
+                                  {product.compare_at_price != null &&
+                                    Number(product.compare_at_price) >
+                                      Number(product.base_price) && (
+                                      <span className="font-mono text-xs text-ink-muted line-through">
+                                        {formatCurrency(
+                                          Number(product.compare_at_price),
+                                          currencyCode
+                                        )}
+                                      </span>
+                                    )}
+                                  {hasRegionalPrice && (
+                                    <span className="font-sans text-[11px] font-medium text-ember">
+                                      Tarifa {selectedLocation.city} (Base:{" "}
+                                      {formatCurrency(
+                                        Number(product.global_base_price),
+                                        currencyCode
+                                      )}
+                                      )
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="px-6 py-4 text-center">
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setProductToEdit(product)}
+                                  title="Editar plato y modificadores"
+                                  className="rounded-xl border border-hairline bg-canvas p-2 text-ink-muted transition hover:border-ember hover:text-ember"
+                                >
+                                  <Pencil className="size-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={
+                                    isReadOnlyMutations ||
+                                    product.id === "corte-secreto-pruebas-internas"
+                                  }
+                                  onClick={() => setProductToDelete(product)}
+                                  title={
+                                    product.id === "corte-secreto-pruebas-internas"
+                                      ? "Plato protegido para pruebas automatizadas"
+                                      : "Eliminar plato"
+                                  }
+                                  className="rounded-xl border border-hairline bg-canvas p-2 text-crimson/80 transition hover:bg-crimson/10 hover:text-crimson disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination Controls */}
+                <div className="flex flex-col gap-3 border-t border-hairline px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="text-xs text-ink-muted">
+                    {pageSize > 0 ? (
+                      <>
+                        Mostrando{" "}
+                        <strong className="text-ink">
+                          {Math.min(
+                            (currentPage - 1) * pageSize + 1,
+                            totalFilteredCount
+                          )}
+                        </strong>{" "}
+                        a{" "}
+                        <strong className="text-ink">
+                          {Math.min(
+                            currentPage * pageSize,
+                            totalFilteredCount
+                          )}
+                        </strong>{" "}
+                        de{" "}
+                        <strong className="text-ink">{totalFilteredCount}</strong>{" "}
+                        platos
+                        {totalFilteredCount !== products.length && (
+                          <span> (filtrados de {products.length} en total)</span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        Mostrando{" "}
+                        <strong className="text-ink">{totalFilteredCount}</strong>{" "}
+                        platos en una sola página
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Page Size Selector */}
+                    <div className="flex items-center gap-1 text-xs text-ink-muted">
+                      <span>Filas:</span>
+                      <select
+                        value={pageSize}
+                        onChange={(e) =>
+                          setFacetedFilters((prev) => ({
+                            ...prev,
+                            pageSize: Number(e.target.value),
+                            currentPage: 1,
+                          }))
+                        }
+                        className="rounded-lg border border-border-strong bg-canvas px-2 py-1 text-xs font-semibold text-ink focus:border-ember focus:outline-none"
+                      >
+                        <option value={20}>20 / pág</option>
+                        <option value={50}>50 / pág</option>
+                        <option value={100}>100 / pág</option>
+                        <option value={0}>Todos ({totalFilteredCount})</option>
+                      </select>
+                    </div>
+
+                    {/* Pagination Buttons */}
+                    {pageSize > 0 && totalPages > 1 && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={currentPage <= 1}
+                          onClick={() =>
+                            setFacetedFilters((prev) => ({
+                              ...prev,
+                              currentPage: Math.max(1, prev.currentPage - 1),
+                            }))
+                          }
+                          aria-label="Página anterior"
+                          className="inline-flex size-8 items-center justify-center rounded-lg border border-border-strong bg-canvas text-ink transition hover:border-ember hover:text-ember disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <ChevronLeft className="size-4" />
+                        </button>
+
+                        <span className="px-2 text-xs font-medium text-ink">
+                          {currentPage} de {totalPages}
+                        </span>
+
+                        <button
+                          type="button"
+                          disabled={currentPage >= totalPages}
+                          onClick={() =>
+                            setFacetedFilters((prev) => ({
+                              ...prev,
+                              currentPage: Math.min(
+                                totalPages,
+                                prev.currentPage + 1
+                              ),
+                            }))
+                          }
+                          aria-label="Página siguiente"
+                          className="inline-flex size-8 items-center justify-center rounded-lg border border-border-strong bg-canvas text-ink transition hover:border-ember hover:text-ember disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <ChevronRight className="size-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -2609,6 +3115,39 @@ export function InteractiveDashboardConsole({
           </div>
         </div>
       </div>
+
+      {/* 5. MODALS: PRODUCT EDITOR, CATEGORY MANAGER, DELETE CONFIRM */}
+      <ProductEditorModal
+        isOpen={isCreateProductOpen || Boolean(productToEdit)}
+        product={productToEdit}
+        categories={categories}
+        locations={locations}
+        restaurantSlug={restaurantSlug}
+        currencyCode={currencyCode}
+        onClose={() => {
+          setIsCreateProductOpen(false);
+          setProductToEdit(null);
+        }}
+        onSaved={handleProductSaved}
+      />
+
+      <CategoryManagerModal
+        isOpen={isCategoryManagerOpen}
+        restaurantSlug={restaurantSlug}
+        categories={categories}
+        onClose={() => setIsCategoryManagerOpen(false)}
+        onCategoriesChanged={handleCategoriesChanged}
+      />
+
+      <DeleteConfirmModal
+        isOpen={Boolean(productToDelete)}
+        title="Eliminar Plato de Carta"
+        description="¿Estás seguro de que deseas eliminar este plato? Esta acción eliminará permanentemente el producto y todos sus grupos de opciones en PostgreSQL."
+        itemName={productToDelete?.name ?? ""}
+        isPending={isPending}
+        onClose={() => setProductToDelete(null)}
+        onConfirm={handleConfirmDeleteProduct}
+      />
     </div>
   );
 }

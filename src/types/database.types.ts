@@ -1091,6 +1091,62 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_delete_category: {
+        Args: {
+          p_category_id: string
+          p_reassign_to_category_id?: string
+          p_restaurant_slug: string
+        }
+        Returns: Json
+      }
+      admin_delete_product: {
+        Args: { p_product_id: string; p_restaurant_slug: string }
+        Returns: Json
+      }
+      admin_reorder_categories: {
+        Args: { p_category_orders: Json; p_restaurant_slug: string }
+        Returns: Json
+      }
+      admin_upsert_category: {
+        Args: {
+          p_category_id?: string
+          p_description?: string
+          p_display_mode?: string
+          p_is_active?: boolean
+          p_menu_id?: string
+          p_name?: string
+          p_restaurant_slug: string
+          p_slug?: string
+          p_sort_order?: number
+          p_subtitle?: string
+        }
+        Returns: Json
+      }
+      admin_upsert_product: {
+        Args: {
+          p_availability_status?: string
+          p_badges?: string[]
+          p_base_price?: number
+          p_category_id?: string
+          p_compare_at_price?: number
+          p_exclusive_location_id?: string
+          p_image_alt?: string
+          p_image_url?: string
+          p_is_chef_choice?: boolean
+          p_is_featured?: boolean
+          p_is_new?: boolean
+          p_long_description?: string
+          p_name?: string
+          p_option_groups?: Json
+          p_portion_label?: string
+          p_product_id?: string
+          p_restaurant_slug: string
+          p_short_description?: string
+          p_slug?: string
+          p_sort_order?: number
+        }
+        Returns: Json
+      }
       get_operational_console_snapshot: {
         Args: { p_location_id?: string; p_restaurant_slug: string }
         Returns: Json
@@ -1313,3 +1369,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

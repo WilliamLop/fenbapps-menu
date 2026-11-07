@@ -6,25 +6,64 @@ import type {
   SubscriptionStatus,
 } from "@/lib/saas-entitlements";
 
+export interface OperationalOptionItem {
+  id?: string;
+  name: string;
+  price_delta: number;
+  is_available: boolean;
+  sort_order: number;
+}
+
+export interface OperationalOptionGroupItem {
+  id?: string;
+  name: string;
+  helper_text?: string | null;
+  is_required: boolean;
+  min_selections: number;
+  max_selections: number;
+  sort_order: number;
+  options: OperationalOptionItem[];
+}
+
+export interface OperationalCategoryItem {
+  id: string;
+  menu_id: string;
+  slug: string;
+  name: string;
+  subtitle: string | null;
+  description: string | null;
+  display_mode: "editorial_grid" | "compact_list" | "featured_cards";
+  is_active: boolean;
+  sort_order: number;
+  products_count: number;
+}
+
 export interface OperationalProductItem {
   id: string;
   slug: string;
   name: string;
   short_description: string | null;
+  long_description?: string | null;
   global_base_price?: number;
   base_price: number;
+  compare_at_price?: number | null;
   price_override?: number | null;
   global_availability_status?: "available" | "sold_out" | "hidden";
   availability_status: "available" | "sold_out" | "hidden";
   is_featured: boolean;
+  is_new?: boolean;
   is_chef_choice: boolean;
+  badges?: string[];
   portion_label: string | null;
   image_url: string | null;
+  image_alt?: string | null;
   category_id: string;
   category_name: string;
   exclusive_location_id?: string | null;
   exclusive_location_name: string | null;
   location_overrides_count?: number;
+  sort_order?: number;
+  option_groups?: OperationalOptionGroupItem[];
   updated_at: string;
 }
 
@@ -108,6 +147,7 @@ export interface OperationalConsoleSnapshot {
   restaurantId: string;
   restaurantSlug: string;
   selectedLocationId: string | null;
+  categories: OperationalCategoryItem[];
   products: OperationalProductItem[];
   inquiries: OperationalInquiryItem[];
   directOrders: OperationalDirectOrderItem[];
@@ -174,6 +214,9 @@ export async function getOperationalConsoleSnapshot(
       typeof raw.selected_location_id === "string"
         ? raw.selected_location_id
         : null,
+    categories: Array.isArray(raw.categories)
+      ? (raw.categories as OperationalCategoryItem[])
+      : [],
     products: Array.isArray(raw.products)
       ? (raw.products as OperationalProductItem[])
       : [],

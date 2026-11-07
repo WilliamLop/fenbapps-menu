@@ -10,7 +10,8 @@
 - **Stack:** Next.js 15 App Router (Turbopack/Webpack) · React 19 · TypeScript estricto (`noUncheckedIndexedAccess`) · Tailwind CSS v4 · Zod · Supabase PostgreSQL (`@supabase/ssr` / `@supabase/supabase-js`) · `qrcode` (ISO/IEC 18004) · Vitest + Playwright.
 - **Proyecto Supabase:** `gssikxqasqjbyvcdccgl` (`https://gssikxqasqjbyvcdccgl.supabase.co`)
 - **Auditoría de Seguridad Supabase:** `0` lints en Supabase Security Advisors (`{"result":{"lints":[]}}`).
-- **Seguridad en Capa de Datos:** `FORCE ROW LEVEL SECURITY` en todas las tablas públicas. Separación estricta de políticas `SELECT` para rol `anon` y rol `authenticated`. Funciones transaccionales y de validación aisladas en el esquema `private` con invocación segura vía wrappers `SECURITY INVOKER` en `public`.
+- **Seguridad en Capa de Datos:** `FORCE ROW LEVEL SECURITY` en todas las tablas públicas. Separación estricta de políticas `SELECT` para rol `anon` y rol `authenticated`. Funciones transaccionales y de validación aisladas en el esquema `private` con invocación segura vía wrappers `SECURITY INVOKER` en `public`. Blindaje contra mutaciones en Modo Vitrina (`private.can_tenant_mutate`) y protección estricta del fixture de tests `corte-secreto-pruebas-internas`.
+- **Suite de Pruebas Automatizadas:** 29 tests unitarios y de integración RLS pasando al 100% en Vitest (`src/__tests__/security-and-validators.test.ts` y `src/__tests__/catalog-crud-and-filters.test.ts`).
 
 ---
 
@@ -72,6 +73,7 @@ Para grupos gastronómicos con sedes en una o varias ciudades (ej. **Casa Brasa 
      - Sede 1: *Sede Parque de la 93* (Bogotá · Calle 93A # 12-24).
      - Sede 2: *Sede Zona G · Quinta Camacho* (Bogotá · Calle 69A # 5-48).
      - Sede 3: *Sede Provenza · El Poblado* (Medellín · Carrera 35 # 8A-42).
+   - **Carta Sembrada para 100+ Platos:** 104 platos gourmet y de coctelería distribuidos en 7 categorías (`Cortes Madurados & Brasa`, `Entradas al Carbón`, `Guarniciones & Papas Rústicas`, `Postres de Fuego & Horno`, `Coctelería de Autor & Ahumados`, `Vinos & Cavas Seleccionadas`, `Bebidas Sin Alcohol & Aguas Botánicas`) con grupos de opciones, modificadores y precios diferenciales por sede.
    - **Salones Privados:** 4 salones (*Cava Subterránea*, *Gran Salón de Roble*, *Terraza & Asador al Aire Libre*, *Rooftop del Bosque · Provenza*).
    - **Paquetes:** 3 experiencias corporativas y de celebración.
    - **Entitlements:** Plan `full`, Diseño `premium`, Estado `active`.
@@ -94,32 +96,43 @@ Para grupos gastronómicos con sedes en una o varias ciudades (ej. **Casa Brasa 
 | `/[restaurantSlug]` | **Brand Hub Editorial:** Identidad visual adaptativa (`data-theme`), vitrina de sedes con filtrado Multi-Ciudad y Split Horizontal para sede única. Admite `?plan=` para simulación efímera. |
 | `/[restaurantSlug]/menu` | **Carta Digital Inteligente & Domicilios 0%:** Navegación por categorías sticky sin solapamiento, selector Ciudad → Sede, precios regionales, validación de platos agotados por sede, y Drawer de Pedidos / Modo Mesa adaptado al plan activo. Admite `?plan=` y `?sede=`. |
 | `/[restaurantSlug]/eventos` | **Dossier de Salones & Cotizador Interactivo:** Filtro Multi-Ciudad de salones, calculadora presupuestal y formulario de radicación con validación Zero-Trust de fecha futura y Habeas Data. Bloqueado limpiamente si el plan no incluye eventos (sin error 404). Admite `?plan=` y `?sede=`. |
-| `/dashboard/[restaurantSlug]` | **Consola Operativa Aislada ("Mise en Place"):** Barra de contexto Multi-Ciudad/Sede, edición de precios globales o regionales, 1-clic para agotar platos por sede, bandejas aisladas de pedidos y eventos, generador QR ISO/IEC 18004 contextual y banner ejecutivo en Modo Vitrina. Admite `?sede=` y `?plan=`. |
+| `/dashboard/[restaurantSlug]` | **Consola Operativa Aislada ("Mise en Place"):** Barra de contexto Multi-Ciudad/Sede, filtros facetados para 100+ platos, paginación ergonómica, CRUD completo de categorías y platos con modificadores, edición de precios globales o regionales, 1-clic para agotar platos por sede, bandejas aisladas de pedidos y eventos, generador QR ISO/IEC 18004 contextual y banner ejecutivo en Modo Vitrina. Admite `?sede=` y `?plan=`. |
 
 ---
 
 ## 6. Contratos de Base de Datos & RPCs Clave (PostgreSQL)
 
 - **`private.has_active_feature(p_restaurant_id uuid, p_feature_key text)`:** Resuelve disponibilidad de features combinando plan, suscripción y overrides.
+- **`private.can_tenant_mutate(p_restaurant_id uuid)`:** Bloquea mutaciones operativas si el tenant está en `vitrine_only` o `suspended`.
 - **`private.insert_validated_direct_order(...)`:** Valida y recalcula en servidor precios reales según sede seleccionada (`product_locations`), costo de envío, pedido mínimo y feature flag `direct_orders`. Genera radicado `CB-DOM-XXXX`.
 - **`private.insert_validated_event_inquiry(...)`:** Valida tenencia de salón/paquete por sede, fecha futura y feature flag `events_crm`. Genera radicado `CB-YYMM-XXXX`.
-- **`public.get_operational_console_snapshot(p_restaurant_slug text, p_location_id uuid DEFAULT NULL)`:** Entrega el snapshot operativo aislado para la sede indicada (o global de marca si es `NULL`).
+- **`public.get_operational_console_snapshot(p_restaurant_slug text, p_location_id uuid DEFAULT NULL)`:** Entrega snapshot enriquecido con categorías, productos (100+ platos), grupos de opciones, precios diferenciales por sede, bandejas de pedidos/eventos y logs de auditoría.
+- **`public.admin_upsert_category(p_restaurant_slug, p_category_id, p_name, p_slug, ...)`:** Crea o actualiza categorías con modo de visualización editorial y validación anti-vitrina.
+- **`public.admin_delete_category(p_restaurant_slug, p_category_id, p_reassign_to_category_id)`:** Elimina categorías de forma segura permitiendo reasignar los platos a otra categoría activa.
+- **`public.admin_reorder_categories(p_restaurant_slug, p_category_orders)`:** Actualiza el orden secuencial de categorías en batch atómico.
+- **`public.admin_upsert_product(p_restaurant_slug, p_product_id, p_name, p_slug, p_base_price, ...)`:** Crea o actualiza platos sincronizando atómicamente sus grupos de opciones y modificadores (`product_option_groups` / `product_options`).
+- **`public.admin_delete_product(p_restaurant_slug, p_product_id)`:** Elimina permanentemente platos protegiendo los fixtures de pruebas automatizadas.
 - **`public.update_product_operational_state(p_restaurant_slug, p_product_id, p_availability_status, p_base_price, p_location_id DEFAULT NULL)`:** Actualiza precio o disponibilidad a nivel de sede (`product_locations`) o maestro global con registro en `audit_logs`.
 - **`public.super_admin_list_tenants()`:** Lista métricas, sedes y configuración de entitlements de todos los restaurantes para el panel `/super-admin`.
 - **`public.super_admin_update_entitlements(...)`:** Persiste cambios comerciales en `restaurant_entitlements`.
 
 ---
 
-## 7. Próximas Fases Planificadas (Backlog Quirúrgico)
+## 7. Estado de las Fases del Backlog
 
-### Fase 2: Filtros Avanzados en Catálogo CRM & CRUD Completo de Carta (Próxima Sesión)
-- **Filtros Avanzados en Pestaña 1:** Barra de filtrado facetado para restaurantes con 100+ platos (por categoría, rango de precio, estado `available`/`sold_out`/`hidden`, platos con precio regional modificado y buscador semántico).
-- **CRUD Completo de Categorías & Platos:**
-  - Crear, editar y reordenar categorías (`public.categories`).
-  - Modal de creación/edición de plato: nombre, descripción, porción, categoría, precio base, insignias (`is_featured`, `is_chef_choice`), imagen y grupos de opciones/modificadores (`product_option_groups` / `product_options`).
-  - Eliminación segura con verificación de integridad referencial.
+### ✅ Fase 1: Arquitectura Multi-Ciudad, Modelo Comercial 2 Ejes & Modo Vitrina (COMPLETADA)
+- Infraestructura Supabase, RLS reforzado, simulación en vivo de planes, QR ISO/IEC 18004.
 
-### Fase 3: Promociones, Combos & Happy Hour por Sede (Futura Sesión)
-- **Promociones Dinámicas:** Precios tachados ("Antes \$X / Ahora \$Y") programables con fecha de inicio y fin.
+### ✅ Fase 2: Filtros Facetados para 100+ Platos & CRUD Completo de Carta en Consola Operativa (COMPLETADA)
+- **Filtros Facetados Avanzados:** Filtrado por categoría con contadores en tiempo real, búsqueda instantánea multi-campo (nombre, descripción, porción, insignias), estado de disponibilidad (`available`, `sold_out`, `hidden`), selector de precios con presets rápidos, conmutador de diferencial de precio regional, filtros de insignias (Destacado, Chef, Nuevo) y modificadores.
+- **Paginación Ergonómica:** Selector de tamaño de página (20, 50, 100, Todos) con contador "Mostrando X a Y de Z platos".
+- **CRUD Completo de Categorías:** Modal para crear, editar, reordenar y eliminar categorías de forma segura con reasignación de platos huérfanos.
+- **CRUD Completo de Platos & Modificadores:** Modal con pestañas (General, Precios & Estado, Textos & Foto con presets de demo, Modificadores & Grupos de opciones) con sincronización atómica en PostgreSQL.
+- **Semilla Gourmet 104 Platos:** Carta completa de Casa Brasa con 104 platos en 7 categorías reales.
+- **Seguridad RLS & 0 Advisors Lints:** Todas las mutaciones validadas por `can_tenant_mutate`, auditadas en `audit_logs`, 0 lints en Supabase Advisors y 29 tests automatizados pasando al 100%.
+
+### 🔜 Fase 3: Promociones, Combos & Happy Hour por Sede (Próxima Fase)
+- **Promociones Dinámicas:** Precios tachados ("Antes $X / Ahora $Y") programables con fecha de inicio y fin.
 - **Combos Personalizables:** Plato fuerte + acompañamiento + bebida con descuento consolidado y control de stock enlazado (`linked_product_id`).
+- **Horarios Promocionales (Happy Hour):** Activación automática según hora de Colombia (`America/Bogota`).
 - **Horarios Promocionales (Happy Hour):** Activación automática según hora de Colombia (`America/Bogota`).

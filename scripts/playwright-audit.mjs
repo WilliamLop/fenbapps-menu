@@ -304,12 +304,16 @@ async function runAudit() {
     await page.waitForTimeout(200);
 
     // Click "Recomendados" filter
-    const highlightsBtn = page.locator("button", { hasText: "Recomendados" });
-    await highlightsBtn.click();
-    await page.waitForTimeout(200);
-    const highlightsCount = await page.locator("article").count();
-    await highlightsBtn.click(); // reset
-    await page.waitForTimeout(200);
+    let highlightsCount = 0;
+    const highlightsBtn = page.locator("button", { hasText: "Recomendados" }).first();
+    if (await highlightsBtn.count() > 0) {
+      await highlightsBtn.scrollIntoViewIfNeeded();
+      await highlightsBtn.click({ force: true });
+      await page.waitForTimeout(200);
+      highlightsCount = await page.locator("article").count();
+      await highlightsBtn.click({ force: true }); // reset
+      await page.waitForTimeout(200);
+    }
 
     // Open product detail modal with variants (specifically "Ribeye Ojo de Bife" if present, else first with options)
     const ribeyeCard = page

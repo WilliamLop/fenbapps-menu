@@ -100,6 +100,22 @@ export default async function RestaurantDashboardPage({
     new Set(effectiveLocations.map((l) => l.city).filter(Boolean))
   );
 
+  const fallbackCategories = data.categories.map((cat, idx) => ({
+    id: cat.id,
+    menu_id: cat.menu_id,
+    slug: cat.slug,
+    name: cat.name,
+    subtitle: cat.subtitle,
+    description: cat.description,
+    display_mode: cat.display_mode as
+      | "editorial_grid"
+      | "compact_list"
+      | "featured_cards",
+    is_active: cat.is_active,
+    sort_order: cat.sort_order ?? idx + 1,
+    products_count: cat.products.length,
+  }));
+
   const fallbackProducts = data.categories.flatMap((cat) =>
     cat.products.map((p) => ({
       id: p.id,
@@ -329,6 +345,11 @@ export default async function RestaurantDashboardPage({
           deliveryEnabled={
             caps.directOrdersEnabled &&
             (data.delivery.enabled || data.delivery.pickupEnabled)
+          }
+          initialCategories={
+            snapshot?.categories && snapshot.categories.length > 0
+              ? snapshot.categories
+              : fallbackCategories
           }
           initialProducts={snapshot?.products ?? fallbackProducts}
           initialInquiries={snapshot?.inquiries ?? []}

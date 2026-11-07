@@ -311,3 +311,283 @@ export async function setSimPlanCookieAction(
     };
   }
 }
+
+// ----------------------------------------------------------------------------
+// Phase 2: Category & Product CRUD Server Actions
+// ----------------------------------------------------------------------------
+
+import {
+  adminUpsertCategorySchema,
+  adminDeleteCategorySchema,
+  adminReorderCategoriesSchema,
+  adminUpsertProductSchema,
+  adminDeleteProductSchema,
+} from "@/lib/validators/catalog";
+
+export async function adminUpsertCategoryAction(
+  rawInput: z.input<typeof adminUpsertCategorySchema>
+): Promise<OperationalActionResult & { categoryId?: string }> {
+  const parsed = adminUpsertCategorySchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error:
+        parsed.error.errors[0]?.message ||
+        "Datos de categoría inválidos.",
+    };
+  }
+
+  const {
+    restaurantSlug,
+    categoryId,
+    menuId,
+    name,
+    slug,
+    subtitle,
+    description,
+    displayMode,
+    isActive,
+    sortOrder,
+  } = parsed.data;
+
+  try {
+    const supabase = await createSupabaseAuthenticatedServerClient();
+    const { data, error } = await supabase.rpc("admin_upsert_category", {
+      p_restaurant_slug: restaurantSlug,
+      p_category_id: categoryId ?? undefined,
+      p_menu_id: menuId ?? undefined,
+      p_name: name,
+      p_slug: slug,
+      p_subtitle: subtitle ?? undefined,
+      p_description: description ?? undefined,
+      p_display_mode: displayMode,
+      p_is_active: isActive,
+      p_sort_order: sortOrder,
+    });
+
+    if (error) {
+      return {
+        ok: false,
+        error: error.message || "No fue posible guardar la categoría.",
+      };
+    }
+
+    revalidatePath(`/${restaurantSlug}`);
+    revalidatePath(`/${restaurantSlug}/menu`);
+    revalidatePath(`/dashboard/${restaurantSlug}`);
+
+    const res = data as Record<string, unknown> | null;
+    return {
+      ok: true,
+      categoryId: typeof res?.category_id === "string" ? res.category_id : undefined,
+    };
+  } catch {
+    return {
+      ok: false,
+      error: "Error inesperado al guardar la categoría.",
+    };
+  }
+}
+
+export async function adminDeleteCategoryAction(
+  rawInput: z.input<typeof adminDeleteCategorySchema>
+): Promise<OperationalActionResult> {
+  const parsed = adminDeleteCategorySchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Parámetros de eliminación de categoría inválidos.",
+    };
+  }
+
+  const { restaurantSlug, categoryId, reassignToCategoryId } = parsed.data;
+
+  try {
+    const supabase = await createSupabaseAuthenticatedServerClient();
+    const { error } = await supabase.rpc("admin_delete_category", {
+      p_restaurant_slug: restaurantSlug,
+      p_category_id: categoryId,
+      p_reassign_to_category_id: reassignToCategoryId ?? undefined,
+    });
+
+    if (error) {
+      return {
+        ok: false,
+        error: error.message || "No fue posible eliminar la categoría.",
+      };
+    }
+
+    revalidatePath(`/${restaurantSlug}`);
+    revalidatePath(`/${restaurantSlug}/menu`);
+    revalidatePath(`/dashboard/${restaurantSlug}`);
+
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      error: "Error inesperado al eliminar la categoría.",
+    };
+  }
+}
+
+export async function adminReorderCategoriesAction(
+  rawInput: z.input<typeof adminReorderCategoriesSchema>
+): Promise<OperationalActionResult> {
+  const parsed = adminReorderCategoriesSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Datos de reordenamiento de categorías inválidos.",
+    };
+  }
+
+  const { restaurantSlug, categoryOrders } = parsed.data;
+
+  try {
+    const supabase = await createSupabaseAuthenticatedServerClient();
+    const { error } = await supabase.rpc("admin_reorder_categories", {
+      p_restaurant_slug: restaurantSlug,
+      p_category_orders: categoryOrders,
+    });
+
+    if (error) {
+      return {
+        ok: false,
+        error: error.message || "No fue posible reordenar las categorías.",
+      };
+    }
+
+    revalidatePath(`/${restaurantSlug}`);
+    revalidatePath(`/${restaurantSlug}/menu`);
+    revalidatePath(`/dashboard/${restaurantSlug}`);
+
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      error: "Error inesperado al reordenar las categorías.",
+    };
+  }
+}
+
+export async function adminUpsertProductAction(
+  rawInput: z.input<typeof adminUpsertProductSchema>
+): Promise<OperationalActionResult & { productId?: string }> {
+  const parsed = adminUpsertProductSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error:
+        parsed.error.errors[0]?.message ||
+        "Datos del plato inválidos.",
+    };
+  }
+
+  const p = parsed.data;
+
+  // Format option groups as jsonb array expected by RPC
+  const formattedOptionGroups = p.optionGroups.map((grp) => ({
+    id: grp.id,
+    name: grp.name,
+    helper_text: grp.helperText ?? null,
+    is_required: grp.isRequired,
+    min_selections: grp.minSelections,
+    max_selections: grp.maxSelections,
+    sort_order: grp.sortOrder,
+    options: grp.options.map((opt) => ({
+      id: opt.id,
+      name: opt.name,
+      price_delta: opt.priceDelta,
+      is_available: opt.isAvailable,
+      sort_order: opt.sortOrder,
+    })),
+  }));
+
+  try {
+    const supabase = await createSupabaseAuthenticatedServerClient();
+    const { data, error } = await supabase.rpc("admin_upsert_product", {
+      p_restaurant_slug: p.restaurantSlug,
+      p_product_id: p.productId ?? undefined,
+      p_category_id: p.categoryId,
+      p_name: p.name,
+      p_slug: p.slug,
+      p_short_description: p.shortDescription ?? undefined,
+      p_long_description: p.longDescription ?? undefined,
+      p_base_price: p.basePrice,
+      p_compare_at_price: p.compareAtPrice ?? undefined,
+      p_portion_label: p.portionLabel ?? undefined,
+      p_image_url: p.imageUrl ?? undefined,
+      p_image_alt: p.imageAlt ?? undefined,
+      p_availability_status: p.availabilityStatus,
+      p_is_featured: p.isFeatured,
+      p_is_new: p.isNew,
+      p_is_chef_choice: p.isChefChoice,
+      p_badges: p.badges,
+      p_exclusive_location_id: p.exclusiveLocationId ?? undefined,
+      p_sort_order: p.sortOrder,
+      p_option_groups: formattedOptionGroups,
+    });
+
+    if (error) {
+      return {
+        ok: false,
+        error: error.message || "No fue posible guardar el plato.",
+      };
+    }
+
+    revalidatePath(`/${p.restaurantSlug}`);
+    revalidatePath(`/${p.restaurantSlug}/menu`);
+    revalidatePath(`/dashboard/${p.restaurantSlug}`);
+
+    const res = data as Record<string, unknown> | null;
+    return {
+      ok: true,
+      productId: typeof res?.product_id === "string" ? res.product_id : undefined,
+    };
+  } catch {
+    return {
+      ok: false,
+      error: "Error inesperado al guardar el plato.",
+    };
+  }
+}
+
+export async function adminDeleteProductAction(
+  rawInput: z.input<typeof adminDeleteProductSchema>
+): Promise<OperationalActionResult> {
+  const parsed = adminDeleteProductSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Parámetros de eliminación de plato inválidos.",
+    };
+  }
+
+  const { restaurantSlug, productId } = parsed.data;
+
+  try {
+    const supabase = await createSupabaseAuthenticatedServerClient();
+    const { error } = await supabase.rpc("admin_delete_product", {
+      p_restaurant_slug: restaurantSlug,
+      p_product_id: productId,
+    });
+
+    if (error) {
+      return {
+        ok: false,
+        error: error.message || "No fue posible eliminar el plato.",
+      };
+    }
+
+    revalidatePath(`/${restaurantSlug}`);
+    revalidatePath(`/${restaurantSlug}/menu`);
+    revalidatePath(`/dashboard/${restaurantSlug}`);
+
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      error: "Error inesperado al eliminar el plato.",
+    };
+  }
+}
